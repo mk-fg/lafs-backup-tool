@@ -11,17 +11,17 @@ except IOError: readme = ''
 
 setup(
 
-	name = 'cloud-crypt-diff-backup',
-	version = '12.09.1',
+	name = 'lafs-backup-tool',
+	version = '12.10.0',
 	author = 'Mike Kazantsev',
 	author_email = 'mk.fraggod@gmail.com',
 	license = 'WTFPL',
-	keywords = 'backup encryption incremental diff'
-		' rsync cloud free skydrive google drive dropbox',
-	url = 'http://github.com/mk-fg/cloud-crypt-diff-backup',
+	keywords = 'backup encryption incremental'
+		' deduplication tahoe-lafs tahoe lafs rsync cloud raic free xz',
+	url = 'http://github.com/mk-fg/lafs-backup-tool',
 
 	description = 'Tool to securely push incremental'
-		' (think "rsync --link-dest") backups to cloud storage services',
+		' (think "rsync --link-dest") backups to tahoe-lafs.',
 	long_description = readme,
 
 	classifiers = [
@@ -47,6 +47,6 @@ setup(
 	packages = find_packages(),
 	include_package_data = True,
 
-	package_data = {'ccdb': ['core.yaml']},
+	package_data = {'lafs_backup': ['core.yaml']},
 	entry_points = dict(console_scripts=[
-		'ccdb = ccdb.core:main' ]) )
+		'lafs-backup = lafs_backup.core:main' ]) )
