@@ -51,3 +51,5 @@ want, missing only the following features:
 
 	Especially the timestamps, info about compression and deduplication (which
 	files change), to be able to improve system performance, if necessary.
+
+* Just a cleaner rewrite, as a base for any future ideas.
