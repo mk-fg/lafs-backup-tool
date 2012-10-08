@@ -1,0 +1,56 @@
+
+source:
+  # Path or glob pattern (to match path) to backup, required
+  path: # example: /srv/backups/weekly.*
+  # Path to intermediate backup queue-file (list of paths to upload)
+  queue: # example: /srv/backups/queue.txt
+  # Path to persistent db of remote directory nodes, required
+  dentry_cache: # example: /srv/backups/dentries.db
+
+  pick_policy: alphasort_last
+
+
+filter:
+  # Either tuples like "[action ('+' or '-'), regexp]" or just exclude-patterns (python
+  #  regexps) to match relative (to source.path, starting with "/") paths to backup.
+  # Patterns are matched against each path in order they're listed here.
+  # Leaf directories are matched with the trailing slash
+  #  (as with rsync) to be distinguishable from files with the same name.
+  # If path doesn't match any regexp on the list, it will be included.
+  #
+  # Examples:
+  #  - ['+', '/\.git/config$']   # backup git repository config files
+  #  - '/\.git/'   # *don't* backup any repository objects
+  #  - ['-', '/\.git/']   # exactly same thing as above (redundant)
+  #  - '/(?i)\.?svn(/.*|ignore)$' # exclude (case-insensitive) svn (or .svn) paths and ignore-lists
+
+  - >-
+    /(
+      (CVS|RCS|SCCS|_darcs|\{arch\})(/.*)?|
+      \.(git|hg|bzr|svn|cvs)(/.*|ignore|attributes|tags)?|
+      =(RELEASE-ID|meta-update|update)
+    )$
+
+
+logging: # see http://docs.python.org/library/logging.config.html
+  # "custom" level means WARNING/DEBUG, depending on CLI options
+  warnings: true # capture python warnings
+  version: 1
+  formatters:
+    basic:
+      format: '%(asctime)s :: %(levelname)s: %(message)s'
+      datefmt: '%Y-%m-%d %H:%M:%S'
+  handlers:
+    console:
+      class: logging.StreamHandler
+      stream: ext://sys.stdout
+      formatter: basic
+      level: custom
+    # file:
+    #   class: logging.handlers.WatchedFileHandler
+    #   filename: /var/log/harvestd.log
+    #   formatter: basic
+    #   encoding: utf-8
+    #   level: DEBUG
+  root:
+    level: 0
