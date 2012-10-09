@@ -49,6 +49,7 @@ filter:
 debug:
   queue_only: false # only generate upload queue file, don't upload anything
   reuse_queue: false # don't generate upload queue file, use existing one as-is
+  disable_deduplication: false # make no effort to de-duplicate data (should still work on tahoe-level for files)
 
 
 logging: # see http://docs.python.org/library/logging.config.html

@@ -55,7 +55,7 @@ class LAFSBackup(object):
 		return sorted(paths, reverse=True)[0]
 
 
-	def get_meta(self, path):
+	def meta_get(self, path):
 		fstat = os.lstat(path)
 		meta = dict(uid=bytes(fstat.st_uid), gid=bytes(fstat.st_gid))
 		try: caps = strcaps_get(path)
@@ -65,12 +65,13 @@ class LAFSBackup(object):
 			acls = acl_get(path, effective=False)
 			if acl_is_mode(acls): raise OSError # just a mode reflection
 		except OSError: acls = None # no kernel/fs support
-		mode = fstat.st_mode
-		if acls and not stat.S_ISLNK(fstat.st_mode):
-			meta['acls'] = acls
-			mode ^= stat.S_IMODE(mode)
-			mode |= stat.S_IMODE(acl_get_mode(acls))
-		meta['mode'] = oct(mode).lstrip('0')
+		if not stat.S_ISLNK(fstat.st_mode):
+			mode = fstat.st_mode
+			if acls:
+				meta['acls'] = acls
+				mode ^= stat.S_IMODE(mode)
+				mode |= stat.S_IMODE(acl_get_mode(acls))
+			meta['mode'] = oct(mode).lstrip('0')
 		return meta
 
 	def meta_dump(self, meta):
@@ -90,7 +91,7 @@ class LAFSBackup(object):
 		except ValueError: pass
 		uid, gid, mode = dump.split(':')
 		meta = dict( uid=uid, gid=gid,
-			mode=mode, caps=caps, acls=acls ).viewitems()
+			mode=mode, caps=caps, acls=acls )
 		for k,v in meta.items():
 			if not v: del meta[k]
 		return meta
@@ -107,72 +108,88 @@ class LAFSBackup(object):
 		if not self.conf.debug.reuse_queue:
 			self.build_queue(path, path_queue)
 		if not self.conf.debug.queue_only:
-			return self.backup_queue(path_queue)
+			return self.backup_queue(basename(path), path_queue)
 
 
 	@defer.inlineCallbacks
-	def backup_queue(self, path_queue):
+	def backup_queue(self, backup_name, path_queue):
 		nodes = defaultdict(dict)
 
 		class duplicate_check(object):
 			# Not checking if the actual node is healthy - should be done separately
 			def __init__( self, obj, extras=None,
-					_ec=self.entry_cache, _md=self.meta_dump ):
+					_ec=self.entry_cache, _md=self.meta_dump, _log=self.log ):
 				obj_hash = _md(obj)
-				if extras: obj_hash += '\0' + '\0'.join(sorted(extras))
+				if extras: obj_hash += '\0' + '\0'.join(extras)
 				self.key, self.ec = obj_hash, _ec
+				# _log.noise('Deduplication key: {!r}'.format(self.key))
 			def check(self): return self.ec.get(dc.key)
 			def set(self, cap): self.ec[dc.key] = cap
 
 		with open(path_queue) as queue:
 			for line in queue:
-				path, obj = queue.split(None, 1)
-				path_dir, name = dirname(path), basename(path)
-				cap, obj = None, self.meta_load(meta)
+				line = line.strip()
+				self.log.noise('Processing entry: {}'.format(line))
+
+				try:
+					path, obj = line.split(None, 1)
+				except ValueError: # root dir
+					path, obj = '', line
+					path_dir, name = '', backup_name
+				else:
+					path_dir, name = dirname(path), basename(path)
+				cap, obj = None, self.meta_load(obj)
 
 				if not stat.S_ISDIR(int(obj.get('mode', '0'), 8)):
 					# File(-like) node
 					if 'mode' in obj:
-						contents, data = os.stat(path), open(path)
+						contents, data = os.stat(path), open(path).read()
 						contents = list('{}:{}'.format( k,
-							getattr(contents, k) ) for k in ['st_mtime', 'st_size'])
+							int(getattr(contents, k)) ) for k in ['st_mtime', 'st_size'])
 					else: # symlink
 						data = os.readlink(path)
-						contents = [data]
-					dc = self.duplicate_check(obj, [path] + contents)
-					cap = dc.check()
+						contents = ['symlink:' + data]
+					dc = duplicate_check(obj, [path] + contents)
+					cap = dc.check()\
+						if not self.conf.debug.disable_deduplication else None
 					if not cap:
 						cap = yield self.update_file(data)
 						dc.set(cap)
+					else:
+						self.log.noise('Skipping path as duplicate: {}'.format(path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
 
 				else:
 					# Directory node
 					contents = nodes.pop(path, dict())
-					dc = self.duplicate_check( obj,
+					dc = duplicate_check( obj,
 						map(op.itemgetter('cap'), contents.viewvalues()) )
-					cap = dc.check()
+					cap = dc.check()\
+						if not self.conf.debug.disable_deduplication else None
 					if not cap:
-						cap = yield self.update_file(data)
+						cap = yield self.update_dir(contents)
 						dc.set(cap)
 					obj['cap'], nodes[path_dir][name] = cap, obj
 
-		yield self.update_dir(None, nodes.pop(''))
+		root = nodes.pop('')[backup_name]
+		self.log.debug('Root: {}'.format(root))
+		defer.returnValue(root['cap'])
 
 	def update_file(self, data):
-		return self.http.request('put', self.conf.http.url, data=data)
+		return self.http.request(self.conf.destination.url, 'put', data=data)
 
-	def update_dir(self, obj, nodes):
+	def update_dir(self, nodes):
 		contents = dict()
 		for name, node in nodes.viewitems():
 			node = node.copy()
-			cap = node.pop('cap')
+			try: cap = node.pop('cap')
+			except KeyError:
+				raise KeyError('Node object without cap: {}'.format(node))
 			contents[name] = (
-				'dirnode' if stat.S_ISDIR(int(obj.get('mode', '0'), 8)) else 'filenode',
+				'dirnode' if stat.S_ISDIR(int(node.get('mode', '0'), 8)) else 'filenode',
 				dict(ro_uri=cap, metadata=node) )
-		return self.http.request( 'post',
-			self.conf.http.url + '?t=mkdir-immutable',
-			encode='json', data=contents )
+		return self.http.request( self.conf.destination.url
+			+ '?t=mkdir-immutable', 'post', encode='json', data=contents )
 
 
 	def build_queue(self, path, dst):
@@ -201,9 +218,9 @@ class LAFSBackup(object):
 
 		for path, dirs, files in os.walk('.', topdown=True, onerror=_error_handler):
 			p = path.lstrip('./')
-			yield (p, self.get_meta(p or '.'))
+			yield (p, self.meta_get(p or '.'))
 
-			for i, name in enumerate(dirs):
+			for i, name in list(enumerate(dirs)):
 				path = join(p, name)
 				# Filtered-out dirs won't be descended into
 				if not _check_filter(path + '/'): del dirs[i]
@@ -212,7 +229,11 @@ class LAFSBackup(object):
 			for name in files:
 				path = join(p, name)
 				if not _check_filter(path): continue
-				yield (path, self.get_meta(path))
+				mode = os.lstat(path).st_mode
+				if not stat.S_ISREG(mode) and not stat.S_ISLNK(mode):
+					self.log.info('Skipping special path: {} (mode: {})'.format(path, oct(mode)))
+					continue
+				yield (path, self.meta_get(path))
 
 
 def main():
@@ -231,6 +252,8 @@ def main():
 	parser.add_argument('--reuse-queue', nargs='?',
 		help='Do not generate upload queue file, use'
 			' existing one (path can be specified as an argument) as-is.')
+	parser.add_argument('--disable-deduplication', action='store_true',
+		help='Make no effort to de-duplicate data (should still work on tahoe-level for files).')
 
 	parser.add_argument('--debug',
 		action='store_true', help='Verbose operation mode.')
@@ -246,6 +269,8 @@ def main():
 
 	## CLI overrides
 	if optz.queue_only: cfg.debug.queue_only = optz.queue_only
+	if optz.disable_deduplication:
+		cfg.debug.disable_deduplication = optz.disable_deduplication
 	if optz.reuse_queue:
 		if optz.reuse_queue is not True:
 			cfg.source.queue = optz.reuse_queue

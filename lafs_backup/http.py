@@ -1,7 +1,7 @@
 #-*- coding: utf-8 -*-
 
 import itertools as it, operator as op, functools as ft
-from urllib import urlencode
+from urllib import urlencode, quote
 from mimetypes import guess_type
 from collections import Mapping
 import os, sys, io, re, types, json
@@ -22,6 +22,7 @@ import logging
 log = logging.getLogger(__name__)
 
 
+
 class DataReceiver(protocol.Protocol):
 
 	def __init__(self, done):
@@ -33,6 +34,7 @@ class DataReceiver(protocol.Protocol):
 	def connectionLost(self, reason):
 		# reason.getErrorMessage()
 		self.done.callback(b''.join(self.data))
+
 
 
 class MultipartDataSender(object):
@@ -111,6 +113,7 @@ class MultipartDataSender(object):
 		self.task = None
 
 
+
 class TLSContextFactory(ssl.CertificateOptions):
 
 	isClient = 1
@@ -133,6 +136,7 @@ class TLSContextFactory(ssl.CertificateOptions):
 		return super(TLSContextFactory, self).getContext()
 
 
+
 class QuietHTTP11ClientFactory(protocol.Factory):
 	noisy = False
 	def __init__(self, quiescentCallback):
@@ -140,9 +144,15 @@ class QuietHTTP11ClientFactory(protocol.Factory):
 	def buildProtocol(self, addr):
 		return HTTP11ClientProtocol(self._quiescentCallback)
 
+
 class QuietHTTPConnectionPool(HTTPConnectionPool):
 	_factory = QuietHTTP11ClientFactory
 
+
+class HTTPClientError(Exception):
+	def __init__(self, code, msg):
+		super(Error, self).__init__(code, msg)
+		self.code = code
 
 class HTTPClient(object):
 
@@ -204,7 +214,7 @@ class HTTPClient(object):
 					data = io.BytesIO(urlencode(data))
 				elif encode == 'json':
 					headers.setdefault('Content-Type', 'application/json')
-					data = io.BytesIO(urlencode(json.dumps(data)))
+					data = io.BytesIO(json.dumps(data))
 				else: raise ValueError('Unknown request encoding: {}'.format(encode))
 				data = FileBodyProducer(data)
 
@@ -220,9 +230,9 @@ class HTTPClient(object):
 			if self.debug_requests:
 				log.debug( 'HTTP request done ({} {}): {} {} {}'\
 					.format(method, url[:100], code, res.phrase, res.version) )
-			if code in raise_for: raise ProtocolError(code, res.phrase)
+			if code in raise_for: raise HTTPClientError(code, res.phrase)
 			if code == http.NO_CONTENT: defer.returnValue(None)
-			if code not in [http.OK, http.CREATED]: raise ProtocolError(code, res.phrase)
+			if code not in [http.OK, http.CREATED]: raise HTTPClientError(code, res.phrase)
 
 			data = defer.Deferred()
 			res.deliverBody(DataReceiver(data))
@@ -230,5 +240,5 @@ class HTTPClient(object):
 			assert decode in ['json', None], decode
 			defer.returnValue(json.loads(data) if decode is not None else data)
 
-		except ProtocolError as err:
-			raise raise_for.get(code, ProtocolError)(code, err.message)
+		except HTTPClientError as err:
+			raise raise_for.get(code, HTTPClientError)(code, err.message)
