@@ -1,3 +1,6 @@
+### Default (baseline) configuration parameters.
+### DO NOT ever change this config, use -c commandline option instead!
+
 
 source:
   # Path or glob pattern (to match path) to backup, required
@@ -8,6 +11,15 @@ source:
   dentry_cache: # example: /srv/backups/dentries.db
 
   pick_policy: alphasort_last
+
+
+http:
+  request_pool_options:
+    maxPersistentPerHost: 10
+    cachedConnectionTimeout: 600
+    retryAutomatically: true
+  ca_certs_files: /etc/ssl/certs/ca-certificates.crt # can be a list
+  debug_requests: false # insecure! logs will contain tahoe caps
 
 
 filter:

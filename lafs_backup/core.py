@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+#-*- coding: utf-8 -*-
 
 import itertools as it, operator as op, functools as ft
 from glob import glob
@@ -8,19 +9,34 @@ from tempfile import NamedTemporaryFile
 from subprocess import Popen, PIPE
 import os, sys, re, types, anydbm
 
+from twisted.internet import reactor, defer
 
 is_str = lambda obj,s=types.StringTypes: isinstance(obj, s)
+
+try: from lafs_backup import http
+except ImportError:
+	# Make sure it works from a checkout
+	if isdir(join(dirname(__file__), 'lafs_backup'))\
+			and exists(join(dirname(__file__), 'setup.py')):
+		sys.path.insert(0, dirname(__file__))
+		from lafs_backup import http
+
+import logging
+log = logging.getLogger(__name__)
+
+
 
 class LAFSBackup(object):
 
 	def __init__(self, conf):
 		self.log = logging.getLogger('misc')
 		self.conf = conf
-		self.conf.filter = list(
+		conf.filter = list(
 			( ('-', re.compile(pat))
 				if is_str(pat) else (pat[0], re.compile(pat[1])) )
-			for pat in self.conf.filter )
-		self.dentry_cache = anydbm.open(self.conf.source.dentry_cache, 'c')
+			for pat in conf.filter )
+		self.dentry_cache = anydbm.open(conf.source.dentry_cache, 'c')
+		self.http = http.HTTPClient(**conf.http)
 
 
 	def pick_path(self):
@@ -73,58 +89,76 @@ class LAFSBackup(object):
 		return meta
 
 
-	def update_file(self, data): pass
-		# cap = upload(data) if is_str(obj) else upload(data.read())
-
-	def update_dir(self, obj, nodes):
-		for k,v in obj.viewitems():
-			assert is_str(k) and is_str(v)
-		key = meta_dump(obj)\
-			+ '\0' + '\0'.join(op.itemgetter('cap'), nodes)
-		if key in self.dentry_cache: return key
-		# upload(nodes)
-
-
 	def run(self):
 		path = self.pick_path()
 		if not path:
 			self.log.warn('No (or non-existing) path to backup specified, exiting')
 			return
 		os.chdir(path)
+		path_queue = self.build_queue(path)
+		return self.backup_queue(path_queue)
 
-		with NamedTemporaryFile(
-				dir=dirname(self.conf.queue),
-				prefix=basename(self.conf.queue) + '.' ) as tmp:
-			for path, meta in build_queue(path):
-				tmp.write('{} {}\n'.format(path, self.meta_dump(meta)))
-			tmp.flush()
-			with open(self.conf.queue, 'w') as queue:
-				if Popen(['tac', tmp.name], stdout=queue).wait():
-					raise RuntimeError('Failed to run "tac" binary (coreutils).')
 
-		nodes = defaultdict(list)
-		with open(self.conf.queue) as queue:
+	@defer.inlineCallbacks
+	def backup_queue(self, path_queue):
+		nodes = defaultdict(dict)
+
+		with open(path_queue) as queue:
 			for line in queue:
 				path, obj = queue.split(None, 1)
-				path_dir, obj = dirname(path), self.meta_load(meta)
-				cap = None
+				path_dir, name = dirname(path), basename(path)
+				cap, obj = None, self.meta_load(meta)
 
 				# File node
-				if 'mode' not in obj: cap = self.update_file(os.readlink(path))
-				elif stat.S_ISREG(int(obj['mode'], 8)): cap = self.update_file(open(path))
+				if 'mode' not in obj:
+					cap = yield self.update_file(os.readlink(path))
+				elif stat.S_ISREG(int(obj['mode'], 8)):
+					cap = yield self.update_file(open(path))
 				if cap:
-					obj['cap'] = cap
-					nodes[path_dir].append(obj)
+					obj['cap'], nodes[path_dir][name] = cap, obj
 					continue
 
 				# Directory node
-				obj['cap'] = self.update_dir(obj, nodes.pop(path_dir, list()))
-				nodes[path_dir].append(obj)
+				obj['cap'] = yield self.update_dir(obj, nodes.pop(path_dir, dict()))
+				nodes[path_dir][name] = obj
 
-		self.update_dir(None, nodes.pop(''))
+		yield self.update_dir(None, nodes.pop(''))
+
+	def update_file(self, data):
+		# TODO: deduplication
+		return self.http.request('put', '/uri', data_raw=data, raw=True)
+
+	def update_dir(self, obj, nodes):
+		# TODO: deduplication
+		for k,v in obj.viewitems():
+			assert is_str(k) and is_str(v)
+		obj_hash = meta_dump(obj)\
+			+ '\0' + '\0'.join(sorted(it.imap(op.itemgetter('cap'), nodes)))
+		if key in self.dentry_cache: return key
+
+		contents = dict()
+		for name, node in nodes.viewitems():
+			node = node.copy()
+			cap = node.pop('cap')
+			contents[name] = (
+				'dirnode' if stat.S_ISDIR(int(obj.get('mode', '0'), 8)) else 'filenode',
+				dict(ro_uri=cap, metadata=node) )
+		self.http.request('post', '/uri?t=mkdir-immutable', data=contents)
 
 
 	def build_queue(self, path):
+		dst = self.conf.queue
+		with NamedTemporaryFile(
+				dir=dirname(dst), prefix=basename(dst) + '.' ) as tmp:
+			for path, meta in build_queue(path):
+				tmp.write('{} {}\n'.format(path, self.meta_dump(meta)))
+			tmp.flush()
+			with open(dst, 'w') as queue:
+				if Popen(['tac', tmp.name], stdout=queue).wait():
+					raise RuntimeError('Failed to run "tac" binary (coreutils).')
+		return dst
+
+	def queue_generator(self, path):
 
 		def _error_handler(err): raise err
 
@@ -153,7 +187,6 @@ class LAFSBackup(object):
 				yield (path, self.get_meta(path))
 
 
-
 def main():
 	import argparse
 	parser = argparse.ArgumentParser(
@@ -169,6 +202,7 @@ def main():
 	optz = parser.parse_args()
 
 	## Read configuration files
+	from twisted.python import log as twisted_log
 	cfg = lya.AttrDict.from_yaml('{}.yaml'.format(
 		os.path.splitext(os.path.realpath(__file__))[0] ))
 	for k in optz.config: cfg.update_yaml(k)
@@ -177,12 +211,13 @@ def main():
 	if optz.dry_run: cfg.debug.dry_run = optz.dry_run
 
 	## Logging
-	import logging
 	lya.configure_logging( cfg.logging,
 		logging.DEBUG if optz.debug else logging.WARNING )
+	twisted_log.PythonLoggingObserver().start()
 
 	log.debug('Starting...')
-	LAFSBackup(cfg).run()
+	LAFSBackup(cfg).run().addBoth(lambda ignored: [reactor.stop(), ignored][1])
+	reactor.start()
 	log.debug('Finished')
 
 if __name__ == '__main__': main()
