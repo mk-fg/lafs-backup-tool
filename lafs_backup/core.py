@@ -143,7 +143,7 @@ class LAFSBackup(object):
 				if not stat.S_ISDIR(int(obj.get('mode', '0'), 8)):
 					# File(-like) node
 					if 'mode' in obj:
-						contents, data = os.stat(path), open(path).read()
+						contents, data = os.stat(path), open(path)
 						contents = list('{}:{}'.format( k,
 							int(getattr(contents, k)) ) for k in ['st_mtime', 'st_size'])
 					else: # symlink
@@ -182,9 +182,7 @@ class LAFSBackup(object):
 		contents = dict()
 		for name, node in nodes.viewitems():
 			node = node.copy()
-			try: cap = node.pop('cap')
-			except KeyError:
-				raise KeyError('Node object without cap: {}'.format(node))
+			cap = node.pop('cap')
 			contents[name] = (
 				'dirnode' if stat.S_ISDIR(int(node.get('mode', '0'), 8)) else 'filenode',
 				dict(ro_uri=cap, metadata=node) )
