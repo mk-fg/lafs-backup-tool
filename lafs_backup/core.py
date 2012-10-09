@@ -247,7 +247,7 @@ def main():
 
 	parser.add_argument('--queue-only', action='store_true',
 		help='Only generate upload queue file and stop there.')
-	parser.add_argument('--reuse-queue', nargs='?',
+	parser.add_argument('--reuse-queue', nargs='?', metavar='PATH',
 		help='Do not generate upload queue file, use'
 			' existing one (path can be specified as an argument) as-is.')
 	parser.add_argument('--disable-deduplication', action='store_true',
