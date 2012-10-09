@@ -52,7 +52,7 @@ debug:
 
 
 logging: # see http://docs.python.org/library/logging.config.html
-  # "custom" level means WARNING/DEBUG, depending on CLI options
+  # "custom" level means WARNING/DEBUG/NOISE, depending on CLI options
   warnings: true # capture python warnings
   version: 1
   formatters:

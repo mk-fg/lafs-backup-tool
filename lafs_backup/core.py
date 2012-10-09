@@ -194,6 +194,7 @@ class LAFSBackup(object):
 			for x, pat in filters:
 				assert x in '+-', 'Only +/- pattern actions are allowed.'
 				if pat.search(path):
+					self.log.noise('Path matched filter ({}, {}): {!r}'.format(x, pat.pattern, path))
 					accept = (x == '+')
 					break
 			return accept
@@ -233,6 +234,8 @@ def main():
 
 	parser.add_argument('--debug',
 		action='store_true', help='Verbose operation mode.')
+	parser.add_argument('--noise',
+		action='store_true', help='Even more verbose mode than --debug.')
 	optz = parser.parse_args()
 
 	## Read configuration files
@@ -249,11 +252,21 @@ def main():
 		cfg.debug.reuse_queue = optz.reuse_queue
 
 	## Logging
-	lya.configure_logging( cfg.logging,
-		logging.DEBUG if optz.debug else logging.WARNING )
-	log = logging.getLogger(__name__)
-	twisted_log.PythonLoggingObserver().start()
+	noise = logging.NOISE = logging.DEBUG - 1
+	logging.addLevelName(noise, 'NOISE')
+	def noise(self, msg, noise=noise):
+		if self.isEnabledFor(noise): self._log(noise, msg, ())
+	logging.Logger.noise = noise
 
+	if optz.noise: lvl = logging.NOISE
+	elif optz.debug: lvl = logging.DEBUG
+	else: lvl = logging.WARNING
+	lya.configure_logging(cfg.logging, lvl)
+
+	twisted_log.PythonLoggingObserver().start()
+	log = logging.getLogger(__name__)
+
+	## Start
 	log.debug('Starting...')
 	reactor.callLater( 0,
 		lambda: defer.maybeDeferred(LAFSBackup(cfg).run)\
