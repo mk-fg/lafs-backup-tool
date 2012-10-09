@@ -109,33 +109,39 @@ class LAFSBackup(object):
 				path_dir, name = dirname(path), basename(path)
 				cap, obj = None, self.meta_load(meta)
 
-				# File node
-				if 'mode' not in obj:
-					cap = yield self.update_file(os.readlink(path))
-				elif stat.S_ISREG(int(obj['mode'], 8)):
-					cap = yield self.update_file(open(path))
-				if cap:
-					obj['cap'], nodes[path_dir][name] = cap, obj
-					continue
+				if not stat.S_ISDIR(int(obj.get('mode', '0'), 8)):
+					# File(-like) node
+					if 'mode' in obj:
+						contents, data = os.stat(path), open(path)
+						contents = list('{}:{}'.format( k,
+							getattr(contents, k) ) for k in ['st_mtime', 'st_size'])
+					else: # symlink
+						data = os.readlink(path)
+						contents = [data]
+					cap = yield defer.maybeDeferred(self.duplicate_check(obj, contents))
+					obj['cap'] = cap or (yield self.update_file(data))
+					nodes[path_dir][name] = obj
 
-				# Directory node
-				obj['cap'] = yield self.update_dir(obj, nodes.pop(path_dir, dict()))
-				nodes[path_dir][name] = obj
+				else:
+					# Directory node
+					contents = nodes.pop(path, dict())
+					cap = yield defer.maybeDeferred(self.duplicate_check(
+						obj, map(op.itemgetter('cap'), contents.viewvalues()) ))
+					obj['cap'] = cap or (yield self.update_dir(obj, contents))
+					nodes[path_dir][name] = obj
 
 		yield self.update_dir(None, nodes.pop(''))
 
+	def duplicate_check(self, obj, extras=None):
+		obj_hash = meta_dump(obj)
+		if extras: obj_hash += '\0' + '\0'.join(sorted(extras))
+		# Not checking if the actual node is healthy - should be done separately
+		return self.dentry_cache.get(key)
+
 	def update_file(self, data):
-		# TODO: deduplication
-		return self.http.request('put', '/uri', data_raw=data, raw=True)
+		return self.http.request('put', self.conf.http.url, data=data)
 
 	def update_dir(self, obj, nodes):
-		# TODO: deduplication
-		for k,v in obj.viewitems():
-			assert is_str(k) and is_str(v)
-		obj_hash = meta_dump(obj)\
-			+ '\0' + '\0'.join(sorted(it.imap(op.itemgetter('cap'), nodes)))
-		if key in self.dentry_cache: return key
-
 		contents = dict()
 		for name, node in nodes.viewitems():
 			node = node.copy()
@@ -143,7 +149,9 @@ class LAFSBackup(object):
 			contents[name] = (
 				'dirnode' if stat.S_ISDIR(int(obj.get('mode', '0'), 8)) else 'filenode',
 				dict(ro_uri=cap, metadata=node) )
-		self.http.request('post', '/uri?t=mkdir-immutable', data=contents)
+		return self.http.request( 'post',
+			self.conf.http.url + '?t=mkdir-immutable',
+			encode='json', data=contents )
 
 
 	def build_queue(self, path):

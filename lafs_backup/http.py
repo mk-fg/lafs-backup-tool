@@ -220,6 +220,7 @@ class HTTPClient(object):
 			if self.debug_requests:
 				log.debug( 'HTTP request done ({} {}): {} {} {}'\
 					.format(method, url[:100], code, res.phrase, res.version) )
+			if code in raise_for: raise ProtocolError(code, res.phrase)
 			if code == http.NO_CONTENT: defer.returnValue(None)
 			if code not in [http.OK, http.CREATED]: raise ProtocolError(code, res.phrase)
 

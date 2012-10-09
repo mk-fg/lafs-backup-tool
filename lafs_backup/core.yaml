@@ -13,6 +13,11 @@ source:
   pick_policy: alphasort_last
 
 
+destination:
+  # URL of Tahoe-LAFS node webapi
+  url: http://localhost:3456/uri
+
+
 http:
   request_pool_options:
     maxPersistentPerHost: 10
