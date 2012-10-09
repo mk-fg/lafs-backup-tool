@@ -3,13 +3,17 @@
 
 import itertools as it, operator as op, functools as ft
 from glob import glob
-from os.path import join, dirname, basename
+from os.path import join, exists, isdir, dirname, basename, abspath
 from collections import defaultdict
 from tempfile import NamedTemporaryFile
 from subprocess import Popen, PIPE
-import os, sys, re, types, anydbm
+import os, sys, stat, re, types, anydbm, logging
 
 from twisted.internet import reactor, defer
+from fgc.strcaps import get_file as strcaps_get
+from fgc.acl import get as acl_get,\
+	is_mode as acl_is_mode, get_mode as acl_get_mode
+import lya
 
 is_str = lambda obj,s=types.StringTypes: isinstance(obj, s)
 
@@ -21,21 +25,24 @@ except ImportError:
 		sys.path.insert(0, dirname(__file__))
 		from lafs_backup import http
 
-import logging
-log = logging.getLogger(__name__)
-
 
 
 class LAFSBackup(object):
 
+	conf_required = 'source.path', 'source.queue', 'source.entry_cache'
+
 	def __init__(self, conf):
-		self.log = logging.getLogger('misc')
 		self.conf = conf
+		assert all(op.attrgetter(k)(self.conf) for k in self.conf_required),\
+			'Missing some required configuration'\
+				' parameters, one of: {}'.format(', '.join(self.conf_required))
+
+		self.log = logging.getLogger('misc')
 		conf.filter = list(
 			( ('-', re.compile(pat))
 				if is_str(pat) else (pat[0], re.compile(pat[1])) )
-			for pat in conf.filter )
-		self.dentry_cache = anydbm.open(conf.source.dentry_cache, 'c')
+			for pat in (conf.filter or list()) )
+		self.entry_cache = anydbm.open(conf.source.entry_cache, 'c')
 		self.http = http.HTTPClient(**conf.http)
 
 
@@ -50,26 +57,26 @@ class LAFSBackup(object):
 
 	def get_meta(self, path):
 		fstat = os.lstat(path)
-		meta = dict(uid=fstat.st_uid, gid=fstat.st_gid)
-		try: meta['caps'] = strcaps_get(path)
-		except OSError: pass # no kernel/fs support
+		meta = dict(uid=bytes(fstat.st_uid), gid=bytes(fstat.st_gid))
+		try: caps = strcaps_get(path)
+		except OSError: caps = None # no kernel/fs support
+		if caps: meta['caps'] = caps
 		try:
 			acls = acl_get(path, effective=False)
 			if acl_is_mode(acls): raise OSError # just a mode reflection
 		except OSError: acls = None # no kernel/fs support
-		if not stat.S_ISLNK(fstat.st_mode):
-			if acls:
-				mode = stat.S_IMODE(acl_get_mode(acls))
-				meta['acls'] = acls
-			else: mode = stat.S_IMODE(fstat.st_mode)
-			mode |= stat.S_IFMT(fstat.st_mode)
-			meta['mode'] = oct(mode).lstrip('0')
+		mode = fstat.st_mode
+		if acls and not stat.S_ISLNK(fstat.st_mode):
+			meta['acls'] = acls
+			mode ^= stat.S_IMODE(mode)
+			mode |= stat.S_IMODE(acl_get_mode(acls))
+		meta['mode'] = oct(mode).lstrip('0')
 		return meta
 
 	def meta_dump(self, meta):
 		uid, gid, mode, caps, acls =\
 			(meta.get(k, '') for k in ['uid', 'gid', 'mode', 'caps', 'acls'])
-		dump = ':'.join(['uid', 'gid', 'mode'])
+		dump = ':'.join([uid, gid, mode])
 		if caps or acls:
 			dump += '/' + caps.replace(' ', ';')
 			if acls: meta += '/' + ','.join(acls)
@@ -90,18 +97,32 @@ class LAFSBackup(object):
 
 
 	def run(self):
+		path_queue = abspath(self.conf.source.queue)
 		path = self.pick_path()
+		self.log.debug('Using source path: {}'.format(path))
 		if not path:
 			self.log.warn('No (or non-existing) path to backup specified, exiting')
 			return
 		os.chdir(path)
-		path_queue = self.build_queue(path)
-		return self.backup_queue(path_queue)
+		if not self.conf.debug.reuse_queue:
+			self.build_queue(path, path_queue)
+		if not self.conf.debug.queue_only:
+			return self.backup_queue(path_queue)
 
 
 	@defer.inlineCallbacks
 	def backup_queue(self, path_queue):
 		nodes = defaultdict(dict)
+
+		class duplicate_check(object):
+			# Not checking if the actual node is healthy - should be done separately
+			def __init__( self, obj, extras=None,
+					_ec=self.entry_cache, _md=self.meta_dump ):
+				obj_hash = _md(obj)
+				if extras: obj_hash += '\0' + '\0'.join(sorted(extras))
+				self.key, self.ec = obj_hash, _ec
+			def check(self): return self.ec.get(dc.key)
+			def set(self, cap): self.ec[dc.key] = cap
 
 		with open(path_queue) as queue:
 			for line in queue:
@@ -118,25 +139,25 @@ class LAFSBackup(object):
 					else: # symlink
 						data = os.readlink(path)
 						contents = [data]
-					cap = yield defer.maybeDeferred(self.duplicate_check(obj, contents))
-					obj['cap'] = cap or (yield self.update_file(data))
-					nodes[path_dir][name] = obj
+					dc = self.duplicate_check(obj, [path] + contents)
+					cap = dc.check()
+					if not cap:
+						cap = yield self.update_file(data)
+						dc.set(cap)
+					obj['cap'], nodes[path_dir][name] = cap, obj
 
 				else:
 					# Directory node
 					contents = nodes.pop(path, dict())
-					cap = yield defer.maybeDeferred(self.duplicate_check(
-						obj, map(op.itemgetter('cap'), contents.viewvalues()) ))
-					obj['cap'] = cap or (yield self.update_dir(obj, contents))
-					nodes[path_dir][name] = obj
+					dc = self.duplicate_check( obj,
+						map(op.itemgetter('cap'), contents.viewvalues()) )
+					cap = dc.check()
+					if not cap:
+						cap = yield self.update_file(data)
+						dc.set(cap)
+					obj['cap'], nodes[path_dir][name] = cap, obj
 
 		yield self.update_dir(None, nodes.pop(''))
-
-	def duplicate_check(self, obj, extras=None):
-		obj_hash = meta_dump(obj)
-		if extras: obj_hash += '\0' + '\0'.join(sorted(extras))
-		# Not checking if the actual node is healthy - should be done separately
-		return self.dentry_cache.get(key)
 
 	def update_file(self, data):
 		return self.http.request('put', self.conf.http.url, data=data)
@@ -154,17 +175,15 @@ class LAFSBackup(object):
 			encode='json', data=contents )
 
 
-	def build_queue(self, path):
-		dst = self.conf.queue
+	def build_queue(self, path, dst):
 		with NamedTemporaryFile(
 				dir=dirname(dst), prefix=basename(dst) + '.' ) as tmp:
-			for path, meta in build_queue(path):
+			for path, meta in self.queue_generator(path):
 				tmp.write('{} {}\n'.format(path, self.meta_dump(meta)))
 			tmp.flush()
 			with open(dst, 'w') as queue:
 				if Popen(['tac', tmp.name], stdout=queue).wait():
 					raise RuntimeError('Failed to run "tac" binary (coreutils).')
-		return dst
 
 	def queue_generator(self, path):
 
@@ -181,7 +200,7 @@ class LAFSBackup(object):
 
 		for path, dirs, files in os.walk('.', topdown=True, onerror=_error_handler):
 			p = path.lstrip('./')
-			yield (p, self.get_meta(p))
+			yield (p, self.get_meta(p or '.'))
 
 			for i, name in enumerate(dirs):
 				path = join(p, name)
@@ -205,6 +224,13 @@ def main():
 			' Can be specified more than once.'
 			' Values from the latter ones override values in the former.'
 			' Available CLI options override the values in any config.')
+
+	parser.add_argument('--queue-only', action='store_true',
+		help='Only generate upload queue file and stop there.')
+	parser.add_argument('--reuse-queue', nargs='?',
+		help='Do not generate upload queue file, use'
+			' existing one (path can be specified as an argument) as-is.')
+
 	parser.add_argument('--debug',
 		action='store_true', help='Verbose operation mode.')
 	optz = parser.parse_args()
@@ -216,16 +242,23 @@ def main():
 	for k in optz.config: cfg.update_yaml(k)
 
 	## CLI overrides
-	if optz.dry_run: cfg.debug.dry_run = optz.dry_run
+	if optz.queue_only: cfg.debug.queue_only = optz.queue_only
+	if optz.reuse_queue:
+		if optz.reuse_queue is not True:
+			cfg.source.queue = optz.reuse_queue
+		cfg.debug.reuse_queue = optz.reuse_queue
 
 	## Logging
 	lya.configure_logging( cfg.logging,
 		logging.DEBUG if optz.debug else logging.WARNING )
+	log = logging.getLogger(__name__)
 	twisted_log.PythonLoggingObserver().start()
 
 	log.debug('Starting...')
-	LAFSBackup(cfg).run().addBoth(lambda ignored: [reactor.stop(), ignored][1])
-	reactor.start()
+	reactor.callLater( 0,
+		lambda: defer.maybeDeferred(LAFSBackup(cfg).run)\
+			.addBoth(lambda ignored: [reactor.stop(), ignored][1]) )
+	reactor.run()
 	log.debug('Finished')
 
 if __name__ == '__main__': main()

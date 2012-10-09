@@ -8,7 +8,7 @@ source:
   # Path to intermediate backup queue-file (list of paths to upload)
   queue: # example: /srv/backups/queue.txt
   # Path to persistent db of remote directory nodes, required
-  dentry_cache: # example: /srv/backups/dentries.db
+  entry_cache: # example: /srv/backups/dentries.db
 
   pick_policy: alphasort_last
 
@@ -41,12 +41,14 @@ filter:
   #  - ['-', '/\.git/']   # exactly same thing as above (redundant)
   #  - '/(?i)\.?svn(/.*|ignore)$' # exclude (case-insensitive) svn (or .svn) paths and ignore-lists
 
-  - >-
-    /(
-      (CVS|RCS|SCCS|_darcs|\{arch\})(/.*)?|
-      \.(git|hg|bzr|svn|cvs)(/.*|ignore|attributes|tags)?|
-      =(RELEASE-ID|meta-update|update)
-    )$
+  # - '/(CVS|RCS|SCCS|_darcs|\{arch\})/$'
+  # - '/\.(git|hg|bzr|svn|cvs)(/|ignore|attributes|tags)?$'
+  # - '/=(RELEASE-ID|meta-update|update)$'
+
+
+debug:
+  queue_only: false # only generate upload queue file, don't upload anything
+  reuse_queue: false # don't generate upload queue file, use existing one as-is
 
 
 logging: # see http://docs.python.org/library/logging.config.html
@@ -55,12 +57,12 @@ logging: # see http://docs.python.org/library/logging.config.html
   version: 1
   formatters:
     basic:
-      format: '%(asctime)s :: %(levelname)s: %(message)s'
+      format: '%(asctime)s :: %(name)s :: %(levelname)s: %(message)s'
       datefmt: '%Y-%m-%d %H:%M:%S'
   handlers:
     console:
       class: logging.StreamHandler
-      stream: ext://sys.stdout
+      stream: ext://sys.stderr
       formatter: basic
       level: custom
     # file:
@@ -69,5 +71,10 @@ logging: # see http://docs.python.org/library/logging.config.html
     #   formatter: basic
     #   encoding: utf-8
     #   level: DEBUG
+  # loggers:
+  #   twisted:
+  #     handlers: [console]
+  #     level: 0
   root:
-    level: 0
+    level: custom
+    handlers: [console]
