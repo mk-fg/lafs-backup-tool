@@ -113,6 +113,44 @@ class MultipartDataSender(object):
 		self.task = None
 
 
+class ChunkingFileBodyProducer(object):
+	implements(IBodyProducer)
+
+	#: Single read/write size
+	chunk_size = 64 * 2**10 # 64 KiB
+
+	def __init__(self, src):
+		self.src = src
+		self.task = None
+		self.length = UNKNOWN_LENGTH
+
+	@defer.inlineCallbacks
+	def upload_file(self, src, dst):
+		try:
+			while True:
+				chunk = src.read(self.chunk_size)
+				if not chunk: break
+				yield dst.write(chunk)
+		finally: src.close()
+
+	def startProducing(self, dst):
+		if not self.task: self.task = self.upload_file(self.src, dst)
+		return self.task
+
+	def resumeProducing(self):
+		if not self.task: return
+		self.task.unpause()
+
+	def pauseProducing(self):
+		if not self.task: return
+		self.task.pause()
+
+	def stopProducing(self):
+		if not self.task: return
+		self.task.cancel()
+		self.task = None
+
+
 
 class TLSContextFactory(ssl.CertificateOptions):
 
@@ -189,7 +227,7 @@ class HTTPClient(object):
 
 	@defer.inlineCallbacks
 	def request( self, url, method='get', decode=None,
-			encode=None, data=None, headers=dict(), raise_for=dict() ):
+			encode=None, data=None, chunks=True, headers=dict(), raise_for=dict() ):
 		'''Make HTTP(S) request.
 			decode (response body) = None | json
 			encode (data) = None | json | form | files'''
@@ -216,7 +254,7 @@ class HTTPClient(object):
 					headers.setdefault('Content-Type', 'application/json')
 					data = io.BytesIO(json.dumps(data))
 				else: raise ValueError('Unknown request encoding: {}'.format(encode))
-				data = FileBodyProducer(data)
+				data = (ChunkingFileBodyProducer if chunks else FileBodyProducer)(data)
 
 		if isinstance(url, unicode): url = url.encode('utf-8')
 		if isinstance(method, unicode): method = method.encode('ascii')
