@@ -12,20 +12,17 @@ from subprocess import Popen, PIPE
 import os, sys, io, fcntl, stat, re, types, anydbm, logging
 
 from twisted.internet import reactor, defer
-from fgc.strcaps import get_file as strcaps_get
-from fgc.acl import get as acl_get,\
-	is_mode as acl_is_mode, get_mode as acl_get_mode
 import lya, lzma
 
 is_str = lambda obj,s=types.StringTypes: isinstance(obj, s)
 
-try: from lafs_backup import http
+try: from lafs_backup import http, meta
 except ImportError:
 	# Make sure it works from a checkout
 	if isdir(join(dirname(__file__), 'lafs_backup'))\
 			and exists(join(dirname(__file__), 'setup.py')):
 		sys.path.insert(0, dirname(__file__))
-		from lafs_backup import http
+		from lafs_backup import http, meta
 
 
 
@@ -76,6 +73,7 @@ class LAFSBackup(object):
 			for pat in (conf.filter or list()) )
 		self.entry_cache = anydbm.open(conf.source.entry_cache, 'c')
 		self.http = http.HTTPClient(**conf.http)
+		self.meta = meta.XMetaHandler()
 
 
 	def pick_path(self):
@@ -90,19 +88,19 @@ class LAFSBackup(object):
 	def meta_get(self, path):
 		fstat = os.lstat(path)
 		meta = dict(uid=bytes(fstat.st_uid), gid=bytes(fstat.st_gid))
-		try: caps = strcaps_get(path)
+		try: caps = self.meta.caps.get_file(path)
 		except OSError: caps = None # no kernel/fs support
 		if caps: meta['caps'] = caps
 		try:
-			acls = acl_get(path, effective=False)
-			if acl_is_mode(acls): raise OSError # just a mode reflection
+			acls = self.meta.acl.get(path, effective=False)
+			if self.meta.acl.is_mode(acls): raise OSError # just a mode reflection
 		except OSError: acls = None # no kernel/fs support
 		if not stat.S_ISLNK(fstat.st_mode):
 			mode = fstat.st_mode
 			if acls:
 				meta['acls'] = acls
 				mode ^= stat.S_IMODE(mode)
-				mode |= stat.S_IMODE(acl_get_mode(acls))
+				mode |= stat.S_IMODE(self.meta.acl.get_mode(acls))
 			meta['mode'] = oct(mode).lstrip('0')
 		return meta
 

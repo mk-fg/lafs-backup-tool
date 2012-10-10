@@ -9,6 +9,10 @@ pkg_root = os.path.dirname(__file__)
 try: readme = open(os.path.join(pkg_root, 'README.md')).read()
 except IOError: readme = ''
 
+import lafs_backup.meta
+ext_stracl = lafs_backup.meta.CStrACL()
+ext_strcaps = lafs_backup.meta.CStrCaps()
+
 setup(
 
 	name = 'lafs-backup-tool',
@@ -42,10 +46,15 @@ setup(
 		'Topic :: System :: Archiving :: Compression',
 		'Topic :: Utilities' ],
 
-	install_requires = ['Twisted', 'layered-yaml-attrdict-config', 'pyliblzma'],
+	install_requires = ['Twisted', 'layered-yaml-attrdict-config', 'pyliblzma', 'cffi'],
 
 	packages = find_packages(),
 	include_package_data = True,
+	zip_safe = False,
+
+	ext_modules=[
+		ext_stracl.ffi.verifier.get_extension(),
+		ext_strcaps.ffi.verifier.get_extension() ],
 
 	package_data = {'lafs_backup': ['core.yaml']},
 	entry_points = dict(console_scripts=[
