@@ -5,10 +5,11 @@ from __future__ import print_function
 import itertools as it, operator as op, functools as ft
 from glob import glob
 from os.path import join, exists, isdir, dirname, basename, abspath
+from datetime import datetime
 from collections import defaultdict
 from tempfile import NamedTemporaryFile
 from subprocess import Popen, PIPE
-import os, sys, io, stat, re, types, anydbm, logging
+import os, sys, io, fcntl, stat, re, types, anydbm, logging
 
 from twisted.internet import reactor, defer
 from fgc.strcaps import get_file as strcaps_get
@@ -128,18 +129,39 @@ class LAFSBackup(object):
 		return meta
 
 
+	@defer.inlineCallbacks
 	def run(self):
 		path_queue = abspath(self.conf.source.queue)
 		path = self.pick_path()
 		self.log.debug('Using source path: {}'.format(path))
 		if not path:
 			self.log.warn('No (or non-existing) path to backup specified, exiting')
-			return
+			defer.returnValue(None)
+
+		path_origin = os.getcwd()
 		os.chdir(path)
+
 		if not self.conf.debug.reuse_queue:
 			self.build_queue(path, path_queue)
-		if not self.conf.debug.queue_only:
-			return self.backup_queue(basename(path), path_queue)
+		root_cap = (yield self.backup_queue(basename(path), path_queue))\
+			if not self.conf.debug.queue_only else None
+
+		os.chdir(path_origin)
+
+		if root_cap:
+			if self.conf.destination.result.print_to_stdout: print(root_cap)
+			if self.conf.destination.result.append_to_file:
+				with open(self.conf.destination.result.append_to_file, 'a') as dst:
+					fcntl.lockf(dst, fcntl.LOCK_EX)
+					dst.write('{} {} {}\n'.format(datetime.now().isoformat(), path, root_cap))
+			if self.conf.destination.result.append_to_lafs_dir:
+				yield self.http.request(
+					'{}/{}/{}?t=uri'.format( self.conf.destination.url.rstrip('/'),
+						self.conf.destination.result.append_to_lafs_dir.strip('/'),
+						basename(path) ), 'put', data=root_cap )
+
+		defer.returnValue(root_cap)
+
 
 
 	@defer.inlineCallbacks
@@ -279,9 +301,10 @@ def main():
 			' Values from the latter ones override values in the former.'
 			' Available CLI options override the values in any config.')
 
-	parser.add_argument('--queue-only', action='store_true',
-		help='Only generate upload queue file and stop there.')
-	parser.add_argument('--reuse-queue', nargs='?', metavar='PATH',
+	parser.add_argument('--queue-only', nargs='?', metavar='path',
+		help='Only generate upload queue file (path can'
+			' be specified as an optional argument) and stop there.')
+	parser.add_argument('--reuse-queue', nargs='?', metavar='path',
 		help='Do not generate upload queue file, use'
 			' existing one (path can be specified as an argument) as-is.')
 	parser.add_argument('--disable-deduplication', action='store_true',
@@ -300,9 +323,12 @@ def main():
 	for k in optz.config: cfg.update_yaml(k)
 
 	## CLI overrides
-	if optz.queue_only: cfg.debug.queue_only = optz.queue_only
 	if optz.disable_deduplication:
 		cfg.debug.disable_deduplication = optz.disable_deduplication
+	if optz.queue_only:
+		if optz.queue_only is not True:
+			cfg.source.queue = optz.queue_only
+		cfg.debug.queue_only = optz.queue_only
 	if optz.reuse_queue:
 		if optz.reuse_queue is not True:
 			cfg.source.queue = optz.reuse_queue

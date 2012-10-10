@@ -178,3 +178,17 @@ of large files at the moment.
 Plus twisted is also a basis for tahoe-lafs implementation, so there's a good
 chance it's already available (unlike gevent, used in requests.async /
 grequests).
+
+
+##### Result
+
+Result of the whole "queue and upload" operation is a single dircap to a root of
+an immutable directory tree.
+
+It can be printed to stdout (which isn't used otherwise, though logging can be
+configured to use it), appended to some text file or be put into some
+higher-level mutable directory (with a basename of a source path).
+
+See "destination.result" section of the [base
+config](https://github.com/mk-fg/lafs-backup-tool/blob/master/lafs_backup/core.yaml)
+for more info on these.

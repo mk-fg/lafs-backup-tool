@@ -10,18 +10,27 @@ source:
   # Path to persistent db of remote directory nodes, required
   entry_cache: # example: /srv/backups/dentries.db
 
-  pick_policy: alphasort_last
+  # How to pick a path among those matched by "path" glob
+  pick_policy: alphasort_last # only one supported
 
 
 destination:
   # URL of Tahoe-LAFS node webapi
   url: http://localhost:3456/uri
 
+  result: # what to do with a cap (URI) of a resulting tree (with full backup)
+    print_to_stdout: true
+    # Append the entry to the specified file (creating it, if doesn't exists)
+    # Example entry: "2012-10-10T23:12:43.904543 /srv/backups/weekly.2012-10-10 URI:DIR2-CHK:..."
+    append_to_file: # example: /srv/backups/lafs_caps
+    # Append the entry to specified tahoe-lafs directory (i.e. put it into that dir)
+    append_to_lafs_dir: # example: URI:DIR2:...
+
   encoding:
     xz:
       enabled: true
       min_size: 5120 # don't compress files smaller than 5 KiB
-      options: # see lzma.LZMAOptions
+      options: # see lzma.LZMAOptions, empty = module defaults
 
 
 http:
