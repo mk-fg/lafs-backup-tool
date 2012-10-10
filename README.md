@@ -68,7 +68,8 @@ Only immutable files/dirnodes are used at the moment.
 * Phase one: generate queue-file with an ordered list of path of files/dirs and
 	metadata to upload.
 
-	Queue file is a human-readable text file with metadata, like this:
+	Queue file is a human-readable line-oriented plaintext list with relative
+	paths and fs metadata, like this:
 
 		bin/skype_notify.sh 1000:1000:100755
 		bin/fs_backup 1000:1000:2750/=;cap_dac_read_search+i
@@ -165,7 +166,7 @@ Metadata is stored in the same format as in the queue-file (described above).
 One addtion to the queue-file format is a "enc" key, which in example above
 indicates that file contents are encoded using xz compression.
 In case of compression (as with most other possible encodings), "size" field
-doesn't indicate real (decoded) file size, which isn't really stored anywhere.
+doesn't indicate real (decoded) file size.
 
 
 ##### Twisted-based http client
