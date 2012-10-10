@@ -42,7 +42,7 @@ setup(
 		'Topic :: System :: Archiving :: Compression',
 		'Topic :: Utilities' ],
 
-	install_requires = ['Twisted', 'layered-yaml-attrdict-config'],
+	install_requires = ['Twisted', 'layered-yaml-attrdict-config', 'pyliblzma'],
 
 	packages = find_packages(),
 	include_package_data = True,

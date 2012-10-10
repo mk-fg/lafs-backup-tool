@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 #-*- coding: utf-8 -*-
+from __future__ import print_function
 
 import itertools as it, operator as op, functools as ft
 from glob import glob
@@ -7,13 +8,13 @@ from os.path import join, exists, isdir, dirname, basename, abspath
 from collections import defaultdict
 from tempfile import NamedTemporaryFile
 from subprocess import Popen, PIPE
-import os, sys, stat, re, types, anydbm, logging
+import os, sys, io, stat, re, types, anydbm, logging
 
 from twisted.internet import reactor, defer
 from fgc.strcaps import get_file as strcaps_get
 from fgc.acl import get as acl_get,\
 	is_mode as acl_is_mode, get_mode as acl_get_mode
-import lya
+import lya, lzma
 
 is_str = lambda obj,s=types.StringTypes: isinstance(obj, s)
 
@@ -25,6 +26,30 @@ except ImportError:
 		sys.path.insert(0, dirname(__file__))
 		from lafs_backup import http
 
+
+
+class FileCompressor(io.FileIO):
+
+	def __init__(self, path):
+		super(FileCompressor, self).__init__(path)
+		self.ctx = lzma.LZMACompressor()
+		self.buff = self.ctx.compress('') # header
+
+	def read(self, n=-1):
+		if not self.ctx: return self.buff
+		buff, self.buff = self.buff, ''
+		while n < 0 or len(buff) < n:
+			src = super(FileCompressor, self).read(n)
+			if src: buff += self.ctx.compress(src)
+			else:
+				buff += self.ctx.flush(lzma.LZMA_FINISH)
+				self.ctx = None
+			if not self.ctx: break
+		if n > 0 and len(buff) > n: buff, self.buff = buff[:n], buff[n:]
+		return buff
+
+	def readall(): raise NotImplementedError()
+	def readinto(b): raise NotImplementedError()
 
 
 class LAFSBackup(object):
@@ -143,13 +168,16 @@ class LAFSBackup(object):
 				if not stat.S_ISDIR(int(obj.get('mode', '0'), 8)):
 					# File(-like) node
 					if 'mode' in obj:
-						contents, data = os.stat(path), open(path)
-						contents = list('{}:{}'.format( k,
-							int(getattr(contents, k)) ) for k in ['st_mtime', 'st_size'])
+						fstat = os.stat(path)
+						if fstat.st_size < self.conf.destination.xz_min_size:
+							obj['compress'], data = 'xz', FileCompressor(path)
+						else: data = open(path)
+						fstat = list('{}:{}'.format( k,
+							int(getattr(fstat, k)) ) for k in ['st_mtime', 'st_size'])
 					else: # symlink
 						data = os.readlink(path)
-						contents = ['symlink:' + data]
-					dc = duplicate_check(obj, [path] + contents)
+						fstat = ['symlink:' + data]
+					dc = duplicate_check(obj, [path] + fstat)
 					cap = dc.check()\
 						if not self.conf.debug.disable_deduplication else None
 					if not cap:

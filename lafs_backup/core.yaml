@@ -16,6 +16,7 @@ source:
 destination:
   # URL of Tahoe-LAFS node webapi
   url: http://localhost:3456/uri
+  xz_min_size: 5120 # 5 KiB
 
 
 http:
