@@ -28,18 +28,24 @@ except ImportError:
 
 
 
-class FileCompressor(io.FileIO):
+class FileEncoder(io.FileIO):
 
-	def __init__(self, path):
-		super(FileCompressor, self).__init__(path)
-		self.ctx = lzma.LZMACompressor()
+	@classmethod
+	def choose(cls, path, conf):
+		if conf.xz.enabled and os.stat(path).st_size > conf.xz.min_size:
+			return 'xz', cls(path, **(conf.xz.options or dict()))
+		else: return None, open(path)
+
+	def __init__(self, path, **xz_kwz):
+		super(FileEncoder, self).__init__(path)
+		self.ctx = lzma.LZMACompressor(**xz_kwz)
 		self.buff = self.ctx.compress('') # header
 
 	def read(self, n=-1):
 		if not self.ctx: return self.buff
 		buff, self.buff = self.buff, ''
 		while n < 0 or len(buff) < n:
-			src = super(FileCompressor, self).read(n)
+			src = super(FileEncoder, self).read(n)
 			if src: buff += self.ctx.compress(src)
 			else:
 				buff += self.ctx.flush(lzma.LZMA_FINISH)
@@ -168,20 +174,20 @@ class LAFSBackup(object):
 				if not stat.S_ISDIR(int(obj.get('mode', '0'), 8)):
 					# File(-like) node
 					if 'mode' in obj:
-						fstat = os.stat(path)
-						if fstat.st_size < self.conf.destination.xz_min_size:
-							obj['compress'], data = 'xz', FileCompressor(path)
-						else: data = open(path)
-						fstat = list('{}:{}'.format( k,
-							int(getattr(fstat, k)) ) for k in ['st_mtime', 'st_size'])
+						enc, contents = FileEncoder.choose(
+							path, self.conf.destination.encoding )
+						if enc: obj['enc'] = enc
+						meta = os.stat(path)
+						meta = list('{}:{}'.format( k,
+							int(getattr(meta, k)) ) for k in ['st_mtime', 'st_size'])
 					else: # symlink
-						data = os.readlink(path)
-						fstat = ['symlink:' + data]
-					dc = duplicate_check(obj, [path] + fstat)
+						contents = os.readlink(path)
+						meta = ['symlink:' + contents]
+					dc = duplicate_check(obj, [path] + meta)
 					cap = dc.check()\
 						if not self.conf.debug.disable_deduplication else None
 					if not cap:
-						cap = yield self.update_file(data)
+						cap = yield self.update_file(contents)
 						dc.set(cap)
 					else:
 						self.log.noise('Skipping path as duplicate: {}'.format(path))

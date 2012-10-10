@@ -134,6 +134,40 @@ Also documented in [base
 config](https://github.com/mk-fg/lafs-backup-tool/blob/master/lafs_backup/core.yaml).
 
 
+##### Edge metadata
+
+Tahoe-LAFS doesn't have a concept like "file inode" (metadata container) at the
+moment, and while it's possible to emulate such thing with intermediate file,
+it's also unnecessary, since arbitrary metadata can be stored inside directory
+entries, beside link to the file contents.
+
+Such metadata can be easily fetched from urls like
+`http://tahoe-webapi/uri/URI:DIR2-CHK:.../?t=json` (see
+docs/frontentds/webapi.rst).
+
+Single file edge with metadata (dumped as YAML):
+
+	README.md:
+	  - filenode
+	  - format: CHK
+	    metadata:
+	      enc: xz
+	      gid: '1000'
+	      mode: '100644'
+	      uid: '1000'
+	    mutable: false
+	    ro_uri: URI:CHK:...
+	    size: 1140
+	    verify_uri: URI:CHK-Verifier:...
+
+Metadata is stored in the same format as in the queue-file (described above).
+
+One addtion to the queue-file format is a "enc" key, which in example above
+indicates that file contents are encoded using xz compression.
+In case of compression (as with most other possible encodings), "size" field
+doesn't indicate real (decoded) file size, which isn't really stored anywhere.
+
+
 ##### Twisted-based http client
 
 I'm quite fond of [requests](http://docs.python-requests.org/en/latest/)
