@@ -492,6 +492,9 @@ def main():
 		cmd.add_argument('--up-to', action='store_true',
 			help='Make sure to remove all the previous known backups as well.')
 
+	with subcommand('dump_config',
+		help='Dump configuration to stdout and exit.') as cmd: pass
+
 	optz = parser.parse_args()
 
 	## Read configuration files
@@ -535,6 +538,8 @@ def main():
 		if not optz.root_cap or '-' in optz.root_cap:
 			caps.update(it.ifilter(None, (line.strip() for line in sys.stdin)))
 		op = LAFSCleanup(cfg, caps, optz.up_to).run
+
+	elif optz.call == 'dump_config': op = ft.partial(cfg.dump, sys.stdout)
 
 	else: parser.error('Unrecognized command: {}'.format(optz.call))
 

@@ -4,7 +4,70 @@ lafs-backup-tool
 Tool to securely push incremental (think "rsync --link-dest") backups to [Tahoe
 Least Authority File System](https://tahoe-lafs.org/).
 
-Under heavy development, not ready for general usage yet.
+
+
+Installation
+--------------------
+
+It's a regular package for Python 2.7 (not 3.X), but not in pypi, so can be
+installed from a checkout with something like that:
+
+	% python setup.py install
+
+Better way would be to use [pip](http://pip-installer.org/) to install all the
+necessary dependencies as well:
+
+	% pip install 'git+https://github.com/mk-fg/lafs-backup-tool.git#egg=lafs-backup-tool'
+
+Note that to install stuff in system-wide PATH and site-packages, elevated
+privileges are often required.
+Use "install --user",
+[~/.pydistutils.cfg](http://docs.python.org/install/index.html#distutils-configuration-files)
+or [virtualenv](http://pypi.python.org/pypi/virtualenv) to do unprivileged
+installs into custom paths.
+
+Alternatively, `./lafs-backup-tool` can be run right from the checkout tree,
+without any installation.
+
+
+### Requirements
+
+* [Python 2.7 (not 3.X)](http://python.org)
+* [layered-yaml-attrdict-config](https://github.com/mk-fg/layered-yaml-attrdict-config)
+* [Twisted](http://twistedmatrix.com) (core components)
+* [CFFI](http://cffi.readthedocs.org) (for fs ACL and capabilities support)
+
+CFFI uses C compiler to generate bindings, so gcc (or other compiler) should be
+available if you build module from source or run straight from checkout tree.
+Some basic system libraries like "libacl" and "libcap" are used through CFFI
+bindings and must be present in system at runtime and/or during build as well.
+
+
+
+Usage
+--------------------
+
+First of all, make a copy of the [base
+configuration](https://github.com/mk-fg/lafs-backup-tool/blob/master/lafs_backup/core.yaml)
+(can be produced without comments by running `lafs-backup-tool dump_config`) and
+set all the required settings there.
+Untouched and uninteresting values can be stripped from there, if only for the
+sake of clarity.
+
+After that, backup process can be started with `lafs-backup-tool -c
+<path_to_local_config> backup`.
+When all files will be backed-up, LAFS URI of the backup root will be, unless
+disabled in config, printed to stdout.
+
+If/when old backup files will be removed from LAFS, `lafs-backup-tool cleanup`
+command should be used to purge removed entries from deduplication cache
+("entry_cache" settings), unless "disable_deduplication" option is used.
+
+CLI reference can be produced by running `lafs-backup-tool --help`.
+For command-specific options, command in question must be specified,
+e.g. `lafs-backup-tool backup -h`.
+
+Additional info can be found in "Implementation details" section below.
 
 
 
@@ -60,7 +123,7 @@ want, missing only the following features:
 Implementation details
 --------------------
 
-Only immutable files/dirnodes are used at the moment.
+Only immutable lafs files/dirnodes are used at the moment.
 
 
 ##### Two-phase operation (of "backup" command)
@@ -80,7 +143,7 @@ Only immutable files/dirnodes are used at the moment.
 		.netrc 1000:1000:100600
 		 1000:1000:100755
 
-	Format of each line is "path uid:gid:[mode]/[posix_caps]/[acls]".
+	Format of each line is "path uid:gid:[mode]/[caps]/[acls]".
 
 * Phase two: read queue-file line-by-line and upload each file (checking if it's
 	not uploaded already) or create a directory entry to/on the grid.
