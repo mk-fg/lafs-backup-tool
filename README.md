@@ -219,9 +219,12 @@ should be done:
 	that directory should be removed from configuration, wrapper scripts or shell
 	history.
 
-* "entry_cache" dbm removed or encrypted in a similar fashion, or all values in
-	it traversed and paths stored there checked on whether they should be removed
-	or not.
+* "entry_cache" dbm removed or encrypted in a similar fashion.
+
+	Alternative is to get value, corresponding to the backup root cap there
+	(generation number) and remove all the items with that number.
+	When item gets used in newer backup, it gets it's generation number bumped, so
+	such operation shouldn't make deduplication cache any worse than it has to.
 
 * If any debug logging was enabled, these logs should be purged, as they may
 	leak various info about the paths and file/dir metadata.

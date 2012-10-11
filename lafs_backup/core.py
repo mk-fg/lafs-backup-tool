@@ -24,6 +24,10 @@ except ImportError:
 		sys.path.insert(0, dirname(__file__))
 		from lafs_backup import http, meta
 
+try: import anyjson as json
+except ImportError:
+	try: import simplejson as json
+	except ImportError: import json
 
 
 class FileEncoder(io.FileIO):
@@ -71,9 +75,12 @@ class LAFSBackup(object):
 			( ('-', re.compile(pat))
 				if is_str(pat) else (pat[0], re.compile(pat[1])) )
 			for pat in (conf.filter or list()) )
-		self.entry_cache = anydbm.open(conf.source.entry_cache, 'c')
 		self.http = http.HTTPClient(**conf.http)
 		self.meta = meta.XMetaHandler()
+
+		self.entry_cache = anydbm.open(conf.source.entry_cache, 'c')
+		self.entry_cache['generation'] =\
+			json.dumps(json.loads(self.entry_cache.get('generation', '0')) + 1)
 
 
 	def pick_path(self):
@@ -136,13 +143,16 @@ class LAFSBackup(object):
 			self.log.warn('No (or non-existing) path to backup specified, exiting')
 			defer.returnValue(None)
 
-		path_origin = os.getcwd()
+		path_origin, root_cap = os.getcwd(), None
 		os.chdir(path)
 
 		if not self.conf.debug.reuse_queue:
+			self.log.debug('Building queue file: {}'.format(path_queue))
 			self.build_queue(path, path_queue)
-		root_cap = (yield self.backup_queue(basename(path), path_queue))\
-			if not self.conf.debug.queue_only else None
+
+		if not self.conf.debug.queue_only:
+			self.log.debug('Uploading stuff from queue file: {}'.format(path_queue))
+			root_cap = (yield self.backup_queue(basename(path), path_queue))\
 
 		os.chdir(path_origin)
 
@@ -167,15 +177,25 @@ class LAFSBackup(object):
 		nodes = defaultdict(dict)
 
 		class duplicate_check(object):
+
 			# Not checking if the actual node is healthy - should be done separately
 			def __init__( self, obj, extras=None,
 					_ec=self.entry_cache, _md=self.meta_dump, _log=self.log ):
+				self.gen = json.loads(_ec['generation'])
 				obj_dump = _md(obj)
 				if extras: obj_dump += '\0' + '\0'.join(extras)
 				# _log.noise('Deduplication key dump: {!r}'.format(obj_dump))
 				self.key, self.ec = obj_dump, _ec
-			def check(self): return self.ec.get(dc.key)
-			def set(self, cap): self.ec[dc.key] = cap
+
+			def use(self):
+				try: cap = self.ec[dc.key]
+				except KeyError: return None
+				gen, cap = json.loads(cap)
+				return self.set(cap)
+
+			def set(self, cap):
+				self.ec[dc.key] = json.dumps((self.gen, cap))
+				return cap
 
 		with open(path_queue) as queue:
 			for line in queue:
@@ -204,7 +224,7 @@ class LAFSBackup(object):
 						contents = os.readlink(path)
 						meta = ['symlink:' + contents]
 					dc = duplicate_check(obj, [path] + meta)
-					cap = dc.check()\
+					cap = dc.use()\
 						if not self.conf.debug.disable_deduplication else None
 					if not cap:
 						cap = yield self.update_file(contents)
@@ -218,7 +238,7 @@ class LAFSBackup(object):
 					contents = nodes.pop(path, dict())
 					dc = duplicate_check( obj,
 						map(op.itemgetter('cap'), contents.viewvalues()) )
-					cap = dc.check()\
+					cap = dc.use()\
 						if not self.conf.debug.disable_deduplication else None
 					if not cap:
 						cap = yield self.update_dir(contents)
@@ -227,6 +247,8 @@ class LAFSBackup(object):
 
 		root = nodes.pop('')[backup_name]
 		self.log.debug('Root: {}'.format(root))
+
+		self.entry_cache[root['cap']] = self.entry_cache['generation']
 		defer.returnValue(root['cap'])
 
 	def update_file(self, data):
