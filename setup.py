@@ -64,4 +64,4 @@ setup(
 
 	package_data = {'lafs_backup': ['core.yaml']},
 	entry_points = dict(console_scripts=[
-		'lafs-backup = lafs_backup.core:main' ]) )
+		'lafs-backup-tool = lafs_backup.core:main' ]) )
