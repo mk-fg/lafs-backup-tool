@@ -10,6 +10,7 @@ from collections import defaultdict
 from tempfile import NamedTemporaryFile
 from subprocess import Popen, PIPE
 from contextlib import contextmanager
+from time import time
 import os, sys, io, fcntl, stat, re, types, logging
 import anydbm, whichdb
 
@@ -41,6 +42,9 @@ class FileEncoder(io.FileIO):
 			return 'xz', cls(path, **(conf.xz.options or dict()))
 		else: return None, open(path)
 
+	size = size_enc = 0
+	ratio = property(lambda s: (s.size_enc / float(s.size)) if s.size else 1)
+
 	def __init__(self, path, **xz_kwz):
 		super(FileEncoder, self).__init__(path)
 		self.ctx = lzma.LZMACompressor(**xz_kwz)
@@ -51,16 +55,26 @@ class FileEncoder(io.FileIO):
 		buff, self.buff = self.buff, ''
 		while n < 0 or len(buff) < n:
 			src = super(FileEncoder, self).read(n)
+			self.size += len(src)
 			if src: buff += self.ctx.compress(src)
 			else:
 				buff += self.ctx.flush(lzma.LZMA_FINISH)
 				self.ctx = None
 			if not self.ctx: break
 		if n > 0 and len(buff) > n: buff, self.buff = buff[:n], buff[n:]
+		self.size_enc += len(buff)
 		return buff
 
 	def readall(): raise NotImplementedError()
 	def readinto(b): raise NotImplementedError()
+
+
+@defer.inlineCallbacks
+def stopwatch_wrapper(func, *argz, **kwz):
+	'Simple wrapper to naively time calls'
+	ts = time()
+	res = yield defer.maybeDeferred(func, *argz, **kwz)
+	defer.returnValue((time() - ts, res))
 
 
 
@@ -233,14 +247,17 @@ class LAFSBackup(LAFSOperation):
 						meta = list('{}:{}'.format( k,
 							int(getattr(meta, k)) ) for k in ['st_mtime', 'st_size'])
 					else: # symlink
-						contents = os.readlink(path)
+						enc, contents = None, os.readlink(path)
 						meta = ['symlink:' + contents]
 					dc = duplicate_check(obj, [path] + meta)
 					cap = dc.use()\
 						if not self.conf.debug.disable_deduplication else None
 					if not cap:
-						cap = yield self.update_file(contents)
+						td, cap = yield stopwatch_wrapper(self.update_file, contents)
 						dc.set(cap)
+						self.log.noise(
+							'Uploaded file (time: {:.1f}s, enc: {}, size_ratio: {:.2f}): {}'\
+							.format(td, enc, contents.ratio if enc else 1, path) )
 					else:
 						self.log.noise('Skipping path as duplicate: {}'.format(path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
@@ -253,8 +270,9 @@ class LAFSBackup(LAFSOperation):
 					cap = dc.use()\
 						if not self.conf.debug.disable_deduplication else None
 					if not cap:
-						cap = yield self.update_dir(contents)
+						td, cap = yield stopwatch_wrapper(self.update_dir, contents)
 						dc.set(cap)
+						self.log.noise('Created dirnode (time: {:.1f}s): {}'.format(td, path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
 
 		root = nodes.pop('')[backup_name]

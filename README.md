@@ -231,6 +231,20 @@ filesystem or underlying block device (e.g. solid-state drives) retaining the
 thought-to-be-removed data.
 
 
+##### Logging
+
+Can be configured via config files (uses [python logging
+subsystem](http://docs.python.org/library/logging.html)) and some CLI parameters
+(for convenience - "--debug", "--noise").
+
+"noise" level (which is lower than "debug") will have per-path logging (O(n)
+scale), while output from any levels above should be independent of the file/dir
+count.
+
+Logs should never contain LAFS URIs/capabilities, but with "noise" level will
+expose paths and some metadata information.
+
+
 ##### Twisted-based http client
 
 I'm quite fond of [requests](http://docs.python-requests.org/en/latest/)
