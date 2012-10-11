@@ -188,17 +188,17 @@ class StrACL(CStrACL):
 	def get_mode(self, acl):
 		'Get mode from acl, path, file or fd'
 		if isinstance(acl, (int, types.StringTypes)):
-			acl = get(acl, mode_filter=True, acl_type=self.ACL_TYPE_ACCESS)
+			acl = self.get(acl, mode_filter=True, acl_type=self.ACL_TYPE_ACCESS)
 		acl = dict((line[0], line[3:]) for line in it.ifilter(_mode, acl))
 		return self.mode(''.join(acl[x] for x in 'ugo'))
 
-	def rebase(self, acl, node, base=None, discard_old_mode=False):
+	def rebase(self, node, acl, base=None, discard_old_mode=False):
 		'Rebase given ACL lines on top of ones, generated from mode'
-		acl, stracl = self.canonized(acl), super(StrACL, self)
+		acl = self.canonized(acl)
 
 		# ACL base
 		if not base and not base == 0: # get current base, if unspecified
-			base = filter(_mode, get(
+			base = filter(_mode, self.get(
 				node, mode_filter=True, acl_type=self.ACL_TYPE_ACCESS ))
 		else: # convert given mode to a canonical base-ACL
 			if not isinstance(base, (int, long)): base = self.mode(base)
@@ -206,31 +206,31 @@ class StrACL(CStrACL):
 
 		# Access ACL
 		ext = it.ifilterfalse(_def_get, acl)
-		stracl.set( '\n'.join( self.update(ext, base)
-			if discard_old_mode else self.update(base, ext) ),
-			node, self.ACL_TYPE_ACCESS )
+		self.set( node, '\n'.join( self.update(ext, base)
+				if discard_old_mode else self.update(base, ext) ),
+			self.ACL_TYPE_ACCESS )
 
 		# Default ACL
 		if isinstance(node, types.StringTypes) and os.path.isdir(node):
 			ext = it.imap(_def_strip, it.ifilter(_def_get, acl))
-			stracl.set( '\n'.join( self.update(ext, base)
-				if discard_old_mode else self.update(base, ext) ),
-				node, self.ACL_TYPE_DEFAULT )
+			self.set( node, '\n'.join( self.update(ext, base)
+					if discard_old_mode else self.update(base, ext) ),
+				self.ACL_TYPE_DEFAULT )
 
-	def apply(self, acl, node):
+	def apply(self, node, acl):
 		'''Just set ACL to a given value,
 		 which must contain all mode-lines as well'''
 		acl = self.canonized(acl)
-		stracl.set('\n'.join(it.ifilterfalse(_def_get, acl)), node)
+		self.set(node, '\n'.join(it.ifilterfalse(_def_get, acl)))
 		if isinstance(node, types.StringTypes) and os.path.isdir(node):
-			super(StrACL, self).set(
+			self.set( node,
 				'\n'.join(it.imap(_def_strip, it.ifilter(_def_get, acl))),
-				node, self.ACL_TYPE_DEFAULT )
+				self.ACL_TYPE_DEFAULT )
 
 	def fix_mask(self, node):
 		'''Fix mask-crippled acls after chmod
 			by updating mask from ACL entries.'''
-		return apply(get(node, effective=False), node)
+		return self.apply(node, self.get(node, effective=False))
 
 	def update(self, base, ext):
 		'Rebase one ACL on top of the other'
@@ -316,7 +316,7 @@ class CStrCaps(object):
 				caps_p = self.libcap.cap_to_text(caps, caps_len_p)
 				if caps_p == self.ffi.NULL:
 					raise OSError(self.ffi.errno, os.strerror(self.ffi.errno))
-			return caps_p[:caps_len_p[0]]
+			return self.ffi.string(caps_p, caps_len_p[0])
 
 		finally:
 			if caps != self.ffi.NULL and self.libcap.cap_free(caps):
