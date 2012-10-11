@@ -63,7 +63,7 @@ Implementation details
 Only immutable files/dirnodes are used at the moment.
 
 
-##### Two-phase operation
+##### Two-phase operation (of "backup" command)
 
 * Phase one: generate queue-file with an ordered list of path of files/dirs and
 	metadata to upload.
@@ -169,18 +169,7 @@ In case of compression (as with most other possible encodings), "size" field
 doesn't indicate real (decoded) file size.
 
 
-##### Twisted-based http client
-
-I'm quite fond of [requests](http://docs.python-requests.org/en/latest/)
-module myself, but unfortunately it doesn't seem to provide streaming uploads
-of large files at the moment.
-
-Plus twisted is also a basis for tahoe-lafs implementation, so there's a good
-chance it's already available (unlike gevent, used in requests.async /
-grequests).
-
-
-##### Result
+##### Backup result
 
 Result of the whole "queue and upload" operation is a single dircap to a root of
 an immutable directory tree.
@@ -214,17 +203,25 @@ should be done:
 * Resulting cap should be removed or encrypted (probably with assymetric crypto,
 	so there'd be no decryption key on the machine), if it was stored on a local
 	machine (e.g. appended to a file).
+	If it was linked to a mutable tahoe directory, it should be unlinked.
 
-	If it was stored in a mutable tahoe directory (and is still there), cap of
-	that directory should be removed from configuration, wrapper scripts or shell
-	history.
+	Provided "cleanup" command can remove caps from any configurable destinations
+	(file, lafs dir), but only if configuration with regard to respective settings
+	("append_to_file", "append_to_lafs_dir") didn't change since backup and entry
+	in lafs dir was not renamed.
 
-* "entry_cache" dbm removed or encrypted in a similar fashion.
+	Naturally, if cap was linked to some other directory node manually, it won't
+	be removed by the command.
 
-	Alternative is to get value, corresponding to the backup root cap there
-	(generation number) and remove all the items with that number.
+* "entry_cache" dbm removed or encrypted in a similar fashion or "cleanup"
+	command is used.
+
+	"cleanup" command gets generation number, corresponding to the backup root cap
+	and removes all the items with that number.
+
 	When item gets used in newer backup, it gets it's generation number bumped, so
-	such operation shouldn't make deduplication cache any worse than it has to.
+	such operation is guaranteed to purge any entries used in this backup but not
+	in any newer ones, which are guaranteed to stay intact.
 
 * If any debug logging was enabled, these logs should be purged, as they may
 	leak various info about the paths and file/dir metadata.
@@ -232,3 +229,14 @@ should be done:
 One should also (naturally) beware of dbm (if it doesn't get removed),
 filesystem or underlying block device (e.g. solid-state drives) retaining the
 thought-to-be-removed data.
+
+
+##### Twisted-based http client
+
+I'm quite fond of [requests](http://docs.python-requests.org/en/latest/)
+module myself, but unfortunately it doesn't seem to provide streaming uploads
+of large files at the moment.
+
+Plus twisted is also a basis for tahoe-lafs implementation, so there's a good
+chance it's already available (unlike gevent, used in requests.async /
+grequests).

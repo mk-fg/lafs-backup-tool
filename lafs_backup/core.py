@@ -9,7 +9,9 @@ from datetime import datetime
 from collections import defaultdict
 from tempfile import NamedTemporaryFile
 from subprocess import Popen, PIPE
-import os, sys, io, fcntl, stat, re, types, anydbm, logging
+from contextlib import contextmanager
+import os, sys, io, fcntl, stat, re, types, logging
+import anydbm, whichdb
 
 from twisted.internet import reactor, defer
 import lya, lzma
@@ -28,6 +30,7 @@ try: import anyjson as json
 except ImportError:
 	try: import simplejson as json
 	except ImportError: import json
+
 
 
 class FileEncoder(io.FileIO):
@@ -60,17 +63,27 @@ class FileEncoder(io.FileIO):
 	def readinto(b): raise NotImplementedError()
 
 
-class LAFSBackup(object):
 
-	conf_required = 'source.path', 'source.queue', 'source.entry_cache'
+class LAFSOperation(object):
+
+	conf_required = None
 
 	def __init__(self, conf):
 		self.conf = conf
-		assert all(op.attrgetter(k)(self.conf) for k in self.conf_required),\
-			'Missing some required configuration'\
-				' parameters, one of: {}'.format(', '.join(self.conf_required))
+		if self.conf_required:
+			assert all(op.attrgetter(k)(self.conf) for k in self.conf_required),\
+				'Missing some required configuration'\
+					' parameters, one of: {}'.format(', '.join(self.conf_required))
+		self.log = logging.getLogger(self.__class__.__name__)
 
-		self.log = logging.getLogger('misc')
+
+
+class LAFSBackup(LAFSOperation):
+
+	conf_required = 'source.path', 'source.queue', 'source.entry_cache.path'
+
+	def __init__(self, conf):
+		super(LAFSBackup, self).__init__(conf)
 		conf.filter = list(
 			( ('-', re.compile(pat))
 				if is_str(pat) else (pat[0], re.compile(pat[1])) )
@@ -78,9 +91,10 @@ class LAFSBackup(object):
 		self.http = http.HTTPClient(**conf.http)
 		self.meta = meta.XMetaHandler()
 
-		self.entry_cache = anydbm.open(conf.source.entry_cache, 'c')
-		self.entry_cache['generation'] =\
-			json.dumps(json.loads(self.entry_cache.get('generation', '0')) + 1)
+		self.entry_cache = anydbm.open(conf.source.entry_cache.path, 'c')
+		entry_cache_gen = json.loads(self.entry_cache.get('generation', '0')) + 1
+		self.log.debug('Backup generation number: {}'.format(entry_cache_gen))
+		self.entry_cache['generation'] = json.dumps(entry_cache_gen)
 
 
 	def pick_path(self):
@@ -171,7 +185,6 @@ class LAFSBackup(object):
 		defer.returnValue(root_cap)
 
 
-
 	@defer.inlineCallbacks
 	def backup_queue(self, backup_name, path_queue):
 		nodes = defaultdict(dict)
@@ -181,11 +194,10 @@ class LAFSBackup(object):
 			# Not checking if the actual node is healthy - should be done separately
 			def __init__( self, obj, extras=None,
 					_ec=self.entry_cache, _md=self.meta_dump, _log=self.log ):
-				self.gen = json.loads(_ec['generation'])
-				obj_dump = _md(obj)
-				if extras: obj_dump += '\0' + '\0'.join(extras)
-				# _log.noise('Deduplication key dump: {!r}'.format(obj_dump))
-				self.key, self.ec = obj_dump, _ec
+				self.ec, self.gen = _ec, json.loads(_ec['generation'])
+				self.key = _md(obj)
+				if extras: self.key += '\0' + '\0'.join(extras)
+				# _log.noise('Deduplication key dump: {!r}'.format(self.key))
 
 			def use(self):
 				try: cap = self.ec[dc.key]
@@ -246,9 +258,8 @@ class LAFSBackup(object):
 					obj['cap'], nodes[path_dir][name] = cap, obj
 
 		root = nodes.pop('')[backup_name]
-		self.log.debug('Root: {}'.format(root))
-
-		self.entry_cache[root['cap']] = self.entry_cache['generation']
+		self.entry_cache['root:' + root['cap']] = json.dumps((
+			json.loads(self.entry_cache['generation']), backup_name ))
 		defer.returnValue(root['cap'])
 
 	def update_file(self, data):
@@ -310,6 +321,115 @@ class LAFSBackup(object):
 				yield (path, self.meta_get(path))
 
 
+
+class LAFSCleanup(LAFSOperation):
+
+	conf_required = 'source.entry_cache.path',
+
+	def __init__(self, conf, caps, with_history=False):
+		super(LAFSCleanup, self).__init__(conf)
+		self.caps, self.with_history = caps, with_history
+
+		self.delete_from_lafs_dir = self.delete_from_file = None
+		if conf.destination.result.append_to_lafs_dir:
+			client = http.HTTPClient(**conf.http)
+			class NotFoundError(Exception): pass
+			@defer.inlineCallbacks
+			def delete_from_lafs_dir(name):
+				try:
+					defer.returnValue((yield client.request(
+						'{}/{}/{}'.format( conf.destination.url.rstrip('/'),
+							conf.destination.result.append_to_lafs_dir.strip('/'), name ),
+						'delete', raise_for={404: NotFoundError, 410: NotFoundError} )))
+				except NotFoundError: pass
+			self.delete_from_lafs_dir = delete_from_lafs_dir
+		if conf.destination.result.append_to_file:
+			self.delete_from_file = conf.destination.result.append_to_file
+
+		self.entry_cache = anydbm.open(conf.source.entry_cache.path, 'c')
+		self.entry_cache_t = whichdb.whichdb(conf.source.entry_cache.path)
+		self.delete_batch = conf.source.entry_cache.delete_batch
+
+	def iter_entry_cache(self):
+		# A can of hacks to work with dbm salad
+		if self.entry_cache_t in ['bsddb185', 'dbhash']:
+			k_prev, (k, v) = None, self.entry_cache.first()
+			while k != k_prev:
+				yield k
+				try: k_prev, (k, v) = k, self.entry_cache.next()
+				except KeyError: break
+		elif self.entry_cache_t in ['dbm', 'gdbm']:
+			k, n = self.entry_cache.firstkey(), self.entry_cache.nextkey
+			while k is not None:
+				yield k
+				k = n(k)
+		elif self.entry_cache_t == 'dumbdbm':
+			for k in self.entry_cache.keys(): yield k
+		else:
+			raise TypeError('Unrecognized dbm type: {!r}'.format(self.entry_cache_t))
+
+	@defer.inlineCallbacks
+	def run(self):
+		gen_max, caps_found = 0, dict()
+
+		for cap in self.caps:
+			cap_key = 'root:' + cap
+			try: gen, name = json.loads(self.entry_cache[cap_key])
+			except KeyError: continue
+			gen_max = max(gen, gen_max)
+			caps_found[cap_key] = gen, name, cap
+
+		if gen_max:
+			cap_gen_chk = set(it.imap(op.itemgetter(0), caps_found.viewvalues()))
+			self.log.debug( 'Scanning entry_cache for generations'
+				' (max: {}): {}'.format(gen_max, ', '.join(it.imap(bytes, cap_gen_chk))) )
+
+			cleanup_keys = set()
+			def key_cleanup():
+				for k in cleanup_keys: del self.entry_cache[k]
+				cleanup_keys.clear()
+
+			ec_iter = self.iter_entry_cache()
+			while True:
+				try: k = next(ec_iter)
+				except StopIteration: break
+
+				if k == 'generation': pass
+				elif k.startswith('root:'):
+					gen = json.loads(self.entry_cache[k])
+					if self.with_history and gen < gen_max and gen not in cap_gen_chk:
+						cleanup_keys.add(k)
+				else:
+					gen, cap = json.loads(self.entry_cache[k])
+					if gen >= gen_max:
+						if self.with_history or gen in cap_gen_chk: cleanup_keys.add(k)
+
+				if self.delete_batch and len(cleanup_keys) > self.delete_batch:
+					key_cleanup()
+					ec_iter = self.iter_entry_cache() # restart iteration
+
+			key_cleanup()
+
+		if caps_found:
+			self.log.debug('Removing root caps from entry_cache')
+			for cap_key, (gen, name, cap) in caps_found.viewitems():
+				if self.delete_from_lafs_dir: yield self.delete_from_lafs_dir(name)
+				if self.delete_from_file:
+					with open(self.delete_from_file, 'a+') as dst:
+						fcntl.lockf(dst, fcntl.LOCK_EX)
+						data = ''.join(line for line in dst if line.split()[-1] != cap)
+						dst.seek(0)
+						dst.truncate()
+						dst.write(data)
+				del self.entry_cache[cap_key]
+
+		if gen_max or caps_found:
+			try: self.entry_cache.sync()
+			except AttributeError: pass
+			try: self.entry_cache.reorganize() # gdbm
+			except AttributeError: pass
+
+
 def main():
 	import argparse
 	parser = argparse.ArgumentParser(
@@ -321,19 +441,39 @@ def main():
 			' Values from the latter ones override values in the former.'
 			' Available CLI options override the values in any config.')
 
-	parser.add_argument('--queue-only', nargs='?', metavar='path',
-		help='Only generate upload queue file (path can'
-			' be specified as an optional argument) and stop there.')
-	parser.add_argument('--reuse-queue', nargs='?', metavar='path',
-		help='Do not generate upload queue file, use'
-			' existing one (path can be specified as an argument) as-is.')
-	parser.add_argument('--disable-deduplication', action='store_true',
-		help='Make no effort to de-duplicate data (should still work on tahoe-level for files).')
-
 	parser.add_argument('--debug',
 		action='store_true', help='Verbose operation mode.')
 	parser.add_argument('--noise',
 		action='store_true', help='Even more verbose mode than --debug.')
+
+	cmds = parser.add_subparsers(
+		title='Supported operations (have their own suboptions as well)')
+
+	@contextmanager
+	def subcommand(name, **kwz):
+		cmd = cmds.add_parser(name, **kwz)
+		cmd.set_defaults(call=name)
+		yield cmd
+
+	with subcommand('backup', help='Backup data to LAFS.') as cmd:
+		cmd.add_argument('--queue-only', nargs='?', metavar='path',
+			help='Only generate upload queue file (path can'
+				' be specified as an optional argument) and stop there.')
+		cmd.add_argument('--reuse-queue', nargs='?', metavar='path',
+			help='Do not generate upload queue file, use'
+				' existing one (path can be specified as an argument) as-is.')
+		cmd.add_argument('--disable-deduplication', action='store_true',
+			help='Make no effort to de-duplicate data (should still work on tahoe-level for files).')
+
+	with subcommand('cleanup',
+			help='Remove the backup from LAFS and local caches.') as cmd:
+		cmd.add_argument('root_cap',
+			nargs='*', metavar='LAFS-URI', default=list(),
+			help='LAFS URI(s) of the backup(s) to remove.'
+				'If not specified (or "-" is used), will be read from stdin.')
+		cmd.add_argument('--up-to', action='store_true',
+			help='Make sure to remove all the previous known backups as well.')
+
 	optz = parser.parse_args()
 
 	## Read configuration files
@@ -341,18 +481,6 @@ def main():
 	cfg = lya.AttrDict.from_yaml('{}.yaml'.format(
 		os.path.splitext(os.path.realpath(__file__))[0] ))
 	for k in optz.config: cfg.update_yaml(k)
-
-	## CLI overrides
-	if optz.disable_deduplication:
-		cfg.debug.disable_deduplication = optz.disable_deduplication
-	if optz.queue_only:
-		if optz.queue_only is not True:
-			cfg.source.queue = optz.queue_only
-		cfg.debug.queue_only = optz.queue_only
-	if optz.reuse_queue:
-		if optz.reuse_queue is not True:
-			cfg.source.queue = optz.reuse_queue
-		cfg.debug.reuse_queue = optz.reuse_queue
 
 	## Logging
 	noise = logging.NOISE = logging.DEBUG - 1
@@ -369,10 +497,33 @@ def main():
 	twisted_log.PythonLoggingObserver().start()
 	log = logging.getLogger(__name__)
 
-	## Start
+	## Operation-specific CLI processing
+	if optz.call == 'backup':
+		if optz.disable_deduplication:
+			cfg.debug.disable_deduplication = optz.disable_deduplication
+		if optz.queue_only:
+			if optz.queue_only is not True:
+				cfg.source.queue = optz.queue_only
+			cfg.debug.queue_only = optz.queue_only
+		if optz.reuse_queue:
+			if optz.reuse_queue is not True:
+				cfg.source.queue = optz.reuse_queue
+			cfg.debug.reuse_queue = optz.reuse_queue
+
+		op = LAFSBackup(cfg).run
+
+	elif optz.call == 'cleanup':
+		caps = set(optz.root_cap).difference({'-'})
+		if not optz.root_cap or '-' in optz.root_cap:
+			caps.update(it.ifilter(None, (line.strip() for line in sys.stdin)))
+		op = LAFSCleanup(cfg, caps, optz.up_to).run
+
+	else: parser.error('Unrecognized command: {}'.format(optz.call))
+
+	## Actual work
 	log.debug('Starting...')
 	reactor.callLater( 0,
-		lambda: defer.maybeDeferred(LAFSBackup(cfg).run)\
+		lambda: defer.maybeDeferred(op)\
 			.addBoth(lambda ignored: [reactor.stop(), ignored][1]) )
 	reactor.run()
 	log.debug('Finished')

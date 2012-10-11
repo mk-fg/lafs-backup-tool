@@ -7,8 +7,11 @@ source:
   path: # example: /srv/backups/weekly.*
   # Path to intermediate backup queue-file (list of paths to upload)
   queue: # example: /srv/backups/queue.txt
-  # Path to persistent db of remote directory nodes, required
-  entry_cache: # example: /srv/backups/dentries.db
+
+  entry_cache:
+    # Path to persistent db of remote directory nodes, required
+    path: # example: /srv/backups/dentries.db
+    delete_batch: 10000 # buffer key deletes, 0 or false for no limit
 
   # How to pick a path among those matched by "path" glob
   pick_policy: alphasort_last # only one supported

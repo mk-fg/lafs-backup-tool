@@ -189,7 +189,7 @@ class QuietHTTPConnectionPool(HTTPConnectionPool):
 
 class HTTPClientError(Exception):
 	def __init__(self, code, msg):
-		super(Error, self).__init__(code, msg)
+		super(HTTPClientError, self).__init__(code, msg)
 		self.code = code
 
 class HTTPClient(object):
