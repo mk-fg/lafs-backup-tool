@@ -24,7 +24,7 @@ for i,ext in enumerate(ext_modules):
 setup(
 
 	name = 'lafs-backup-tool',
-	version = '12.10.0',
+	version = '12.10.1',
 	author = 'Mike Kazantsev',
 	author_email = 'mk.fraggod@gmail.com',
 	license = 'WTFPL',
