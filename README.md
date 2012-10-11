@@ -75,8 +75,8 @@ Additional info can be found in "Implementation details" section below.
 Idea
 --------------------
 
-Use-case is to push most important (chosen by human) parts of already existing
-and static backups (stored as file trees) to lafs cloud backends.
+Intended use-case is to push most important (chosen by human) parts of already
+existing and static backups (stored as file trees) to lafs cloud backends.
 
 Excellent [GridBackup project](https://github.com/divegeek/GridBackup) seem to
 be full of backup-process wisdom, but also more complexity and targetted at a
@@ -92,7 +92,7 @@ want, missing only the following features:
 	cloud-space I plan to use, advantages are quite significant.
 
 	xz (lzma2) compression is usually deterministic, but I suppose it might break
-	occasionally on updates, forcing re-upload of all the files.
+	occasionally on updates, forcing re-upload for some of the files.
 
 	See also: [compression
 	tag](https://tahoe-lafs.org/trac/tahoe-lafs/query?status=!closed&keywords=~compression&order=priority),
@@ -100,8 +100,8 @@ want, missing only the following features:
 
 * Metadata.
 
-	ACLs (and some other xattrs) can and should be properly serialized and added
-	to filesystem edges, if present.
+	Filesystem ACLs and Capabilities can and should be properly serialized and
+	added to filesystem edges, if present on source filesystem.
 
 * Symlinks.
 
@@ -144,7 +144,7 @@ Only immutable lafs files/dirnodes are used at the moment.
 		.netrc 1000:1000:100600
 		 1000:1000:100755
 
-	Format of each line is "path uid:gid:[mode]/[caps]/[acls]".
+	Format of each line is "path uid:gid:[mode][/caps[/acls]]".
 
 * Phase two: read queue-file line-by-line and upload each file (checking if it's
 	not uploaded already) or create a directory entry to/on the grid.
@@ -159,14 +159,16 @@ Only immutable lafs files/dirnodes are used at the moment.
 
 	Note that such "already uploaded" state caching assumes that files stay
 	healthy (i.e. available) in the grid. Appropriate check/repair tools should be
-	used to assure that.
+	used to ensure that that's the case.
 
-Phases can be run individually - queue-file can be generated with `--queue-only`
-and then just read with `--reuse-queue [path]` (or corresponding configuration
-file options).
+Phases can be run individually - queue-file can be generated with `--queue-only
+[path]` and then just read with `--reuse-queue [path]` (or corresponding
+configuration file options).
 
 Interrupted (due to any reason) second phase of backup process (actual upload to
-the grid) can be resumed with `--reuse-queue`.
+the grid) can be resumed by just restarting the operation.
+`--reuse-queue` option may be used to speed things up a little (i.e. skip
+building it again from the same files).
 
 
 ##### Path filter
@@ -210,7 +212,7 @@ Such metadata can be easily fetched from urls like
 `http://tahoe-webapi/uri/URI:DIR2-CHK:.../?t=json` (see
 docs/frontentds/webapi.rst).
 
-Single file edge with metadata (dumped as YAML):
+Single filenode edge with metadata (dumped as YAML):
 
 	README.md:
 	  - filenode
@@ -227,7 +229,7 @@ Single file edge with metadata (dumped as YAML):
 
 Metadata is stored in the same format as in the queue-file (described above).
 
-One addtion to the queue-file format is a "enc" key, which in example above
+One addtion to the queue-file data here is the "enc" key, which in example above
 indicates that file contents are encoded using xz compression.
 In case of compression (as with most other possible encodings), "size" field
 doesn't indicate real (decoded) file size.
@@ -288,7 +290,7 @@ should be done:
 	in any newer ones, which are guaranteed to stay intact.
 
 * If any debug logging was enabled, these logs should be purged, as they may
-	leak various info about the paths and file/dir metadata.
+	leak various info about the paths and source file/dir metadata.
 
 One should also (naturally) beware of dbm (if it doesn't get removed),
 filesystem or underlying block device (e.g. solid-state drives) retaining the
