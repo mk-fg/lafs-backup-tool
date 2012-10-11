@@ -65,10 +65,10 @@ class CStrACL(object):
 			else: self._flag_cache[alias] = None
 
 
-	def flag(self, k):
+	def _flag(self, k):
 		if isinstance(k, (int, long)): return k
 		elif not isinstance(k, types.StringTypes):
-			return reduce(op.or_, it.imap(self.flag, k), 0)
+			return reduce(op.or_, it.imap(self._flag, k), 0)
 		v = self._flag_cache[k]
 		if v is not None: return v
 		else: raise KeyError('Ambiguous flag name: {}'.format(k))
@@ -79,7 +79,7 @@ class CStrACL(object):
 		else:
 			if not isinstance(src, (int, long)): src = src.fileno()
 			func = self.libacl.acl_get_fd
-		acl = func(src, self.flag(acl_type))
+		acl = func(src, self._flag(acl_type))
 
 		try:
 			if acl == self.ffi.NULL:
@@ -87,7 +87,7 @@ class CStrACL(object):
 				raise OSError(self.ffi.errno, os.strerror(self.ffi.errno))
 
 			acl_str = self.libacl.acl_to_any_text(
-				acl, self.ffi.NULL, '\n', self.flag(text_options) )
+				acl, self.ffi.NULL, '\n', self._flag(text_options) )
 			if acl == self.ffi.NULL:
 				raise OSError(self.ffi.errno, os.strerror(self.ffi.errno))
 			acl_str = self.ffi.string(acl_str)
@@ -97,7 +97,7 @@ class CStrACL(object):
 			if acl != self.ffi.NULL and self.libacl.acl_free(acl):
 				raise OSError(self.ffi.errno, os.strerror(self.ffi.errno))
 
-	def set(self, dst, acl_str, acl_type='ACCESS'):
+	def _set(self, dst, acl_str, acl_type='ACCESS'):
 		acl = self.libacl.acl_from_text(acl_str)\
 			if acl_str is not None else self.libacl.acl_init(5)
 		if acl == self.ffi.NULL:
@@ -108,7 +108,7 @@ class CStrACL(object):
 			if self.libacl.acl_calc_mask(acl_p):
 				raise OSError(self.ffi.errno, os.strerror(self.ffi.errno))
 
-			acl_type = self.flag(acl_type)
+			acl_type = self._flag(acl_type)
 			if isinstance(dst, types.StringTypes):
 				err = self.libacl.acl_set_file(dst, acl_type, acl)
 			else:
@@ -120,8 +120,11 @@ class CStrACL(object):
 			if self.libacl.acl_free(acl):
 				raise OSError(self.ffi.errno, os.strerror(self.ffi.errno))
 
+	def set(self, dst, acl_str, acl_type='ACCESS'):
+		return self._set(dst, acl_str, acl_type=acl_type)
+
 	def unset(self, dst, acl_type='ACCESS'):
-		return self.set(dst, None, acl_type=acl_type)
+		return self._set(dst, None, acl_type=acl_type)
 
 	def from_mode( self, mode,
 			text_options=['ABBREVIATE', 'ALL_EFFECTIVE'] ):
@@ -131,7 +134,7 @@ class CStrACL(object):
 
 		try:
 			acl_str = self.libacl.acl_to_any_text(
-				acl, self.ffi.NULL, '\n', self.flag(text_options) )
+				acl, self.ffi.NULL, '\n', self._flag(text_options) )
 			return self.ffi.string(acl_str)
 
 		finally:
@@ -159,10 +162,9 @@ _mode_bits = (
 
 class StrACL(CStrACL):
 
-	def from_mode(self, mode):
-		return self.canonized(super(StrACL, self).from_mode(mode))
+	## High-level fs ACL manipulation API
 
-	def get( self, node, mode_filter=None,
+	def get( self, dst, mode_filter=None,
 			effective=True, acl_type=None ):
 		'Get ACL for a given path, file or fd'
 		acl, stracl = list(), super(StrACL, self)
@@ -173,17 +175,12 @@ class StrACL(CStrACL):
 				it.ifilter if mode_filter else it.ifilterfalse, _mode )
 		if not acl_type or acl_type & self.ACL_TYPE_ACCESS:
 			acl = it.chain(acl, it.imap(
-				effective, mode_filter(stracl.get(node).splitlines())))
+				effective, mode_filter(stracl.get(dst).splitlines())))
 		if (not acl_type or acl_type & self.ACL_TYPE_DEFAULT) and \
-				isinstance(node, types.StringTypes) and os.path.isdir(node):
+				isinstance(dst, types.StringTypes) and os.path.isdir(dst):
 			acl = it.chain(acl, it.imap(_def_set, it.imap( effective,
-				mode_filter(stracl.get(node, self.ACL_TYPE_DEFAULT).splitlines()) )))
+				mode_filter(stracl.get(dst, self.ACL_TYPE_DEFAULT).splitlines()) )))
 		return list(acl)
-
-	def mode(self, strspec, base=0):
-		for n in xrange(len(_mode_bits)):
-			if strspec[n] != '-': base |= _mode_bits[n]
-		return base
 
 	def get_mode(self, acl):
 		'Get mode from acl, path, file or fd'
@@ -192,45 +189,55 @@ class StrACL(CStrACL):
 		acl = dict((line[0], line[3:]) for line in it.ifilter(_mode, acl))
 		return self.mode(''.join(acl[x] for x in 'ugo'))
 
-	def rebase(self, node, acl, base=None, discard_old_mode=False):
+	def rebase(self, dst, acl, base=None, discard_old_mode=False):
 		'Rebase given ACL lines on top of ones, generated from mode'
-		acl = self.canonized(acl)
+		acl, stracl = self.canonized(acl), super(StrACL, self)
 
 		# ACL base
 		if not base and not base == 0: # get current base, if unspecified
 			base = filter(_mode, self.get(
-				node, mode_filter=True, acl_type=self.ACL_TYPE_ACCESS ))
+				dst, mode_filter=True, acl_type=self.ACL_TYPE_ACCESS ))
 		else: # convert given mode to a canonical base-ACL
 			if not isinstance(base, (int, long)): base = self.mode(base)
 			base = self.from_mode(int(base))
 
 		# Access ACL
 		ext = it.ifilterfalse(_def_get, acl)
-		self.set( node, '\n'.join( self.update(ext, base)
+		stracl.set( dst, '\n'.join( self.update(ext, base)
 				if discard_old_mode else self.update(base, ext) ),
 			self.ACL_TYPE_ACCESS )
 
 		# Default ACL
-		if isinstance(node, types.StringTypes) and os.path.isdir(node):
+		if isinstance(dst, types.StringTypes) and os.path.isdir(dst):
 			ext = it.imap(_def_strip, it.ifilter(_def_get, acl))
-			self.set( node, '\n'.join( self.update(ext, base)
+			stracl.set( dst, '\n'.join( self.update(ext, base)
 					if discard_old_mode else self.update(base, ext) ),
 				self.ACL_TYPE_DEFAULT )
 
-	def apply(self, node, acl):
+	def set(self, dst, acl):
 		'''Just set ACL to a given value,
 		 which must contain all mode-lines as well'''
-		acl = self.canonized(acl)
-		self.set(node, '\n'.join(it.ifilterfalse(_def_get, acl)))
-		if isinstance(node, types.StringTypes) and os.path.isdir(node):
-			self.set( node,
+		acl, stracl = self.canonized(acl), super(StrACL, self)
+		stracl.set(dst, '\n'.join(it.ifilterfalse(_def_get, acl)))
+		if isinstance(dst, types.StringTypes) and os.path.isdir(dst):
+			stracl.set( dst,
 				'\n'.join(it.imap(_def_strip, it.ifilter(_def_get, acl))),
 				self.ACL_TYPE_DEFAULT )
 
-	def fix_mask(self, node):
+	def fix_mask(self, dst):
 		'''Fix mask-crippled acls after chmod
 			by updating mask from ACL entries.'''
-		return self.apply(node, self.get(node, effective=False))
+		return self.set(dst, self.get(dst, effective=False))
+
+	## ACL list manipulation methods
+
+	def from_mode(self, mode):
+		return self.canonized(super(StrACL, self).from_mode(mode))
+
+	def mode(self, strspec, base=0):
+		for n in xrange(len(_mode_bits)):
+			if strspec[n] != '-': base |= _mode_bits[n]
+		return base
 
 	def update(self, base, ext):
 		'Rebase one ACL on top of the other'
