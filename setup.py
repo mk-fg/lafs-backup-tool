@@ -10,8 +10,16 @@ try: readme = open(os.path.join(pkg_root, 'README.md')).read()
 except IOError: readme = ''
 
 import lafs_backup.meta
-ext_stracl = lafs_backup.meta.CStrACL()
-ext_strcaps = lafs_backup.meta.CStrCaps()
+
+# Workaround for a weird issue with absolute paths in cffi-0.4
+cwd, ext_modules = os.getcwd(), ['CStrACL', 'CStrCaps']
+for i,ext in enumerate(ext_modules):
+	ext = ext_modules[i] = getattr(
+		lafs_backup.meta, ext )().ffi.verifier.get_extension()
+	for i, src in enumerate(ext.sources):
+		if src.startswith(cwd):
+			ext.sources[i] = src[len(cwd):].lstrip(os.sep)
+
 
 setup(
 
@@ -52,9 +60,7 @@ setup(
 	include_package_data = True,
 	zip_safe = False,
 
-	ext_modules=[
-		ext_stracl.ffi.verifier.get_extension(),
-		ext_strcaps.ffi.verifier.get_extension() ],
+	ext_modules = ext_modules,
 
 	package_data = {'lafs_backup': ['core.yaml']},
 	entry_points = dict(console_scripts=[
