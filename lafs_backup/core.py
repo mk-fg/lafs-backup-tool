@@ -15,9 +15,17 @@ import os, sys, io, fcntl, stat, re, types, logging
 import anydbm, whichdb
 
 from twisted.internet import reactor, defer
-import lya, lzma
+import lya
 
 is_str = lambda obj,s=types.StringTypes: isinstance(obj, s)
+
+try: import lzma
+except ImportError: lzma = None
+
+try: import anyjson as json
+except ImportError:
+	try: import simplejson as json
+	except ImportError: import json
 
 try: from lafs_backup import http, meta
 except ImportError:
@@ -26,11 +34,6 @@ except ImportError:
 			and exists(join(dirname(__file__), 'setup.py')):
 		sys.path.insert(0, dirname(__file__))
 		from lafs_backup import http, meta
-
-try: import anyjson as json
-except ImportError:
-	try: import simplejson as json
-	except ImportError: import json
 
 
 
@@ -47,6 +50,7 @@ class FileEncoder(io.FileIO):
 
 	def __init__(self, path, **xz_kwz):
 		super(FileEncoder, self).__init__(path)
+		if not lzma: import lzma
 		self.ctx = lzma.LZMACompressor(**xz_kwz)
 		self.buff = self.ctx.compress('') # header
 
@@ -448,6 +452,7 @@ class LAFSCleanup(LAFSOperation):
 			except AttributeError: pass
 
 
+
 def main():
 	import argparse
 	parser = argparse.ArgumentParser(
@@ -526,6 +531,8 @@ def main():
 			if optz.queue_only is not True:
 				cfg.source.queue = optz.queue_only
 			cfg.debug.queue_only = optz.queue_only
+		elif cfg.destination.encoding.xz.enabled and not lzma:
+			import lzma # to raise appropriate error before process starts
 		if optz.reuse_queue:
 			if optz.reuse_queue is not True:
 				cfg.source.queue = optz.reuse_queue

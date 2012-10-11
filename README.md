@@ -36,6 +36,7 @@ without any installation.
 * [layered-yaml-attrdict-config](https://github.com/mk-fg/layered-yaml-attrdict-config)
 * [Twisted](http://twistedmatrix.com) (core components)
 * [CFFI](http://cffi.readthedocs.org) (for fs ACL and capabilities support)
+* (optional) [pyliblzma](https://launchpad.net/pyliblzma) - if xz compression is used
 
 CFFI uses C compiler to generate bindings, so gcc (or other compiler) should be
 available if you build module from source or run straight from checkout tree.
@@ -51,8 +52,8 @@ First of all, make a copy of the [base
 configuration](https://github.com/mk-fg/lafs-backup-tool/blob/master/lafs_backup/core.yaml)
 (can be produced without comments by running `lafs-backup-tool dump_config`) and
 set all the required settings there.
-Untouched and uninteresting values can be stripped from there, if only for the
-sake of clarity.
+Untouched and uninteresting values can be stripped from there (reasonable
+defaults from base config will be used), if only for the sake of clarity.
 
 After that, backup process can be started with `lafs-backup-tool -c
 <path_to_local_config> backup`.
