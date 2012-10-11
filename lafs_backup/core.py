@@ -170,10 +170,10 @@ class LAFSBackup(object):
 			# Not checking if the actual node is healthy - should be done separately
 			def __init__( self, obj, extras=None,
 					_ec=self.entry_cache, _md=self.meta_dump, _log=self.log ):
-				obj_hash = _md(obj)
-				if extras: obj_hash += '\0' + '\0'.join(extras)
-				self.key, self.ec = obj_hash, _ec
-				# _log.noise('Deduplication key: {!r}'.format(self.key))
+				obj_dump = _md(obj)
+				if extras: obj_dump += '\0' + '\0'.join(extras)
+				# _log.noise('Deduplication key dump: {!r}'.format(obj_dump))
+				self.key, self.ec = obj_dump, _ec
 			def check(self): return self.ec.get(dc.key)
 			def set(self, cap): self.ec[dc.key] = cap
 

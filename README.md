@@ -63,7 +63,7 @@ Implementation details
 Only immutable files/dirnodes are used at the moment.
 
 
-##### Two-phase operation.
+##### Two-phase operation
 
 * Phase one: generate queue-file with an ordered list of path of files/dirs and
 	metadata to upload.
@@ -192,3 +192,40 @@ higher-level mutable directory (with a basename of a source path).
 See "destination.result" section of the [base
 config](https://github.com/mk-fg/lafs-backup-tool/blob/master/lafs_backup/core.yaml)
 for more info on these.
+
+
+##### Where do lafs caps end up?
+
+In some cases, it might be desirable to remove all keys to uploaded data, even
+though it was read from local disk initially.
+
+* "result" destination (stdout, file or some mutable tahoe dir - see above),
+	naturally.
+
+* Deduplication "entry_cache" dbm file (path is required to be set in
+	"source.entry_cache").
+
+	That file is queried for the actual plaintext caps, so it's impossible to use
+	hashed (or otherwise irreversibly-mapped) values there.
+
+So if old data is to be removed from machine where the tool runs, these things
+should be done:
+
+* Resulting cap should be removed or encrypted (probably with assymetric crypto,
+	so there'd be no decryption key on the machine), if it was stored on a local
+	machine (e.g. appended to a file).
+
+	If it was stored in a mutable tahoe directory (and is still there), cap of
+	that directory should be removed from configuration, wrapper scripts or shell
+	history.
+
+* "entry_cache" dbm removed or encrypted in a similar fashion, or all values in
+	it traversed and paths stored there checked on whether they should be removed
+	or not.
+
+* If any debug logging was enabled, these logs should be purged, as they may
+	leak various info about the paths and file/dir metadata.
+
+One should also (naturally) beware of dbm (if it doesn't get removed),
+filesystem or underlying block device (e.g. solid-state drives) retaining the
+thought-to-be-removed data.
