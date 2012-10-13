@@ -55,6 +55,20 @@ set all the required settings there.
 Untouched and uninteresting values can be stripped from there (reasonable
 defaults from base config will be used), if only for the sake of clarity.
 
+Resulting config file might look something like this:
+
+	source:
+	  path: /srv/backups/backup.*
+	  queue: /srv/backups/tmp/queue.txt
+	  entry_cache:
+	    path: /srv/backups/tmp/dentries.db
+
+	filter:
+	  - [+, '^/var/log/security/'] # backup only that subdir from /var/log
+	  - '^/var/(tmp|cache|log|spool)/'
+	  - '^/home/\w+/Downloads/'
+	  - '^/tmp/'
+
 After that, backup process can be started with `lafs-backup-tool -c
 <path_to_local_config> backup`.
 When all files will be backed-up, LAFS URI of the backup root will be, unless
