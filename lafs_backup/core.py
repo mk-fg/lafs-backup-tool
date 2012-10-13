@@ -453,7 +453,7 @@ class LAFSCleanup(LAFSOperation):
 
 
 
-def main():
+def main(argv=None):
 	import argparse
 	parser = argparse.ArgumentParser(
 		description='LAFS backup tool.')
@@ -500,7 +500,7 @@ def main():
 	with subcommand('dump_config',
 		help='Dump configuration to stdout and exit.') as cmd: pass
 
-	optz = parser.parse_args()
+	optz = parser.parse_args(argv or sys.argv[1:])
 
 	## Read configuration files
 	from twisted.python import log as twisted_log
