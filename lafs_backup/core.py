@@ -50,7 +50,7 @@ class FileEncoder(io.FileIO):
 
 	def __init__(self, path, **xz_kwz):
 		super(FileEncoder, self).__init__(path)
-		if not lzma: import lzma
+		if not lzma: raise ImportError('Missing lzma module')
 		self.ctx = lzma.LZMACompressor(**xz_kwz)
 		self.buff = self.ctx.compress('') # header
 
@@ -260,7 +260,7 @@ class LAFSBackup(LAFSOperation):
 						td, cap = yield stopwatch_wrapper(self.update_file, contents)
 						dc.set(cap)
 						self.log.noise(
-							'Uploaded file (time: {:.1f}s, enc: {}, size_ratio: {:.2f}): {}'\
+							'Uploaded file (time: {:.1f}s, enc: {}, size_ratio: {:.2f}): /{}'\
 							.format(td, enc, contents.ratio if enc else 1, path) )
 					else:
 						self.log.noise('Skipping path as duplicate: {}'.format(path))
@@ -276,7 +276,7 @@ class LAFSBackup(LAFSOperation):
 					if not cap:
 						td, cap = yield stopwatch_wrapper(self.update_dir, contents)
 						dc.set(cap)
-						self.log.noise('Created dirnode (time: {:.1f}s): {}'.format(td, path))
+						self.log.noise('Created dirnode (time: {:.1f}s): /{}'.format(td, path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
 
 		root = nodes.pop('')[backup_name]
@@ -327,10 +327,13 @@ class LAFSBackup(LAFSOperation):
 			p = path.lstrip('./')
 			yield (p, self.meta_get(p or '.'))
 
+			i_off = 0
 			for i, name in list(enumerate(dirs)):
 				path = join(p, name)
 				# Filtered-out dirs won't be descended into
-				if not _check_filter(path + '/'): del dirs[i]
+				if not _check_filter(path + '/'):
+					del dirs[i - i_off]
+					i_off += 1 # original list just became shorter
 				elif os.path.islink(path): files.append(name)
 
 			for name in files:
@@ -532,7 +535,7 @@ def main(argv=None):
 				cfg.source.queue = optz.queue_only
 			cfg.debug.queue_only = optz.queue_only
 		elif cfg.destination.encoding.xz.enabled and not lzma:
-			import lzma # to raise appropriate error before process starts
+			raise ImportError('Missing lzma module')
 		if optz.reuse_queue:
 			if optz.reuse_queue is not True:
 				cfg.source.queue = optz.reuse_queue
