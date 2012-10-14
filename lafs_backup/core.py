@@ -73,16 +73,14 @@ class FileEncoder(io.FileIO):
 		self.buff = self.ctx.compress('') # header
 
 	def read(self, n=-1):
-		if not self.ctx: return self.buff
 		buff, self.buff = self.buff, ''
-		while n < 0 or len(buff) < n:
+		while self.ctx and (n < 0 or len(buff) < n):
 			src = super(FileEncoder, self).read(n)
 			self.size += len(src)
 			if src: buff += self.ctx.compress(src)
 			else:
 				buff += self.ctx.flush(lzma.LZMA_FINISH)
 				self.ctx = None
-			if not self.ctx: break
 		if n > 0 and len(buff) > n: buff, self.buff = buff[:n], buff[n:]
 		self.size_enc += len(buff)
 		return buff
