@@ -64,7 +64,7 @@ Resulting config file might look something like this:
 	    path: /srv/backups/tmp/dentries.db
 
 	filter:
-	  - [+, '^/var/log/security/'] # backup only that subdir from /var/log
+	  - [+, '^/var/log/($|security/)'] # backup only that subdir from /var/log
 	  - '^/var/(tmp|cache|log|spool)/'
 	  - '^/home/\w+/Downloads/'
 	  - '^/tmp/'
