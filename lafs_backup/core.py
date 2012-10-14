@@ -47,7 +47,7 @@ def check_filters(path, filters, default=True, log=None):
 		assert x in '+-', 'Only +/- pattern actions are allowed.'
 		if not isinstance(pat, _re_type): pat = re.compile(pat)
 		if pat.search(path):
-			if log: log.noise('Path matched filter ({}, {}): {!r}'.format(x, pat.pattern, path))
+			# if log: log.noise('Path matched filter ({}, {}): {!r}'.format(x, pat.pattern, path))
 			accept = (x == '+')
 			break
 	return accept
