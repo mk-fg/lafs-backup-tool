@@ -269,21 +269,21 @@ class LAFSBackup(LAFSOperation):
 						enc, contents = FileEncoder.choose(
 							path, self.conf.destination.encoding )
 						if enc: obj['enc'] = enc
-						meta = os.stat(path)
-						meta = list('{}:{}'.format( k,
-							int(getattr(meta, k)) ) for k in ['st_mtime', 'st_size'])
+						ts, size = op.attrgetter('st_mtime', 'st_size')(os.stat(path))
+						meta = ['st_mtime:{:.3f}'.format(ts), 'st_size:{}'.format(size)]
 					else: # symlink
 						enc, contents = None, os.readlink(path)
-						meta = ['symlink:' + contents]
+						meta, size = ['symlink:' + contents], len(contents)
 					dc = duplicate_check(obj, [path] + meta)
 					cap = dc.use()\
 						if not self.conf.debug.disable_deduplication else None
 					if not cap:
-						td, cap = yield stopwatch_wrapper(self.update_file, contents)
+						ts, cap = yield stopwatch_wrapper(self.update_file, contents)
 						dc.set(cap)
 						self.log.noise(
-							'Uploaded file (time: {:.1f}s, enc: {}, size_ratio: {:.2f}): /{}'\
-							.format(td, enc, contents.ratio if enc else 1, path) )
+							'Uploaded file (time: {:.1f}s, size: {}, enc: {}): /{}'\
+							.format(ts, size, '{}[{:.2f}]'.format(
+								enc, contents.ratio ) if enc else 'no', path) )
 					else:
 						self.log.noise('Skipping path as duplicate: {}'.format(path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
@@ -296,9 +296,11 @@ class LAFSBackup(LAFSOperation):
 					cap = dc.use()\
 						if not self.conf.debug.disable_deduplication else None
 					if not cap:
-						td, cap = yield stopwatch_wrapper(self.update_dir, contents)
+						ts, cap = yield stopwatch_wrapper(self.update_dir, contents)
 						dc.set(cap)
-						self.log.noise('Created dirnode (time: {:.1f}s): /{}'.format(td, path))
+						self.log.noise(
+							'Created dirnode (time: {:.1f}s, nodes: {}): /{}'\
+							.format(ts, len(contents), path) )
 					obj['cap'], nodes[path_dir][name] = cap, obj
 
 		root = nodes.pop('')[backup_name]
@@ -569,10 +571,12 @@ def main(argv=None):
 	else: parser.error('Unrecognized command: {}'.format(optz.call))
 
 	## Actual work
+	def _stop(res):
+		if reactor.running: reactor.stop()
+		return res
+	reactor.callWhenRunning(
+		lambda: defer.maybeDeferred(op).addBoth(_stop) )
 	log.debug('Starting...')
-	reactor.callLater( 0,
-		lambda: defer.maybeDeferred(op)\
-			.addBoth(lambda ignored: [reactor.stop(), ignored][1]) )
 	reactor.run()
 	log.debug('Finished')
 
