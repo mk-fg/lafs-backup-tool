@@ -110,9 +110,6 @@ class LAFSBackup(LAFSOperation):
 		self.meta = meta.XMetaHandler()
 
 		self.entry_cache = anydbm.open(conf.source.entry_cache.path, 'c')
-		entry_cache_gen = json.loads(self.entry_cache.get('generation', '0')) + 1
-		self.log.debug('Backup generation number: {}'.format(entry_cache_gen))
-		self.entry_cache['generation'] = json.dumps(entry_cache_gen)
 
 
 	def pick_path(self):
@@ -149,7 +146,7 @@ class LAFSBackup(LAFSOperation):
 		dump = ':'.join([uid, gid, mode])
 		if caps or acls:
 			dump += '/' + caps.replace(' ', ';')
-			if acls: meta += '/' + ','.join(acls)
+			if acls: dump += '/' + ','.join(acls)
 		return dump
 
 	def meta_load(self, dump):
@@ -206,6 +203,10 @@ class LAFSBackup(LAFSOperation):
 	@defer.inlineCallbacks
 	def backup_queue(self, backup_name, path_queue):
 		nodes = defaultdict(dict)
+
+		entry_cache_gen = json.loads(self.entry_cache.get('generation', '0')) + 1
+		self.log.debug('Backup generation number: {}'.format(entry_cache_gen))
+		self.entry_cache['generation'] = json.dumps(entry_cache_gen)
 
 		class duplicate_check(object):
 
