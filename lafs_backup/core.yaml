@@ -32,15 +32,24 @@ destination:
   encoding:
     xz:
       enabled: true
-      min_size: 5120 # don't compress files smaller than 5 KiB
       options: # see lzma.LZMAOptions, empty = module defaults
+      min_size: 5120 # don't compress files smaller than 5 KiB (unless overidden in "path_filter")
       path_filter:
-        # List of include/exclude regexp path-rules, similar to filter section below.
-        # If none of the patterns match path, it is considered compressible.
+        # List of include/exclude regexp path-rules, similar to "filter" section below.
+        # Same as with "filter", rules can be tuples with '+' or '-' (implied for strings) as first element.
+        #  '+' will indicate that file is compressible, if it's size >= "min_size" option.
+        #  Unlike "filter", first element of rule-tuple can also be a number,
+        #   overriding "min_size" parameter for matched (by that rule) paths.
+        # If none of the patterns match path, file is handled as if it was matched by '+' rule.
+
         # - '\.(gz|bz2|t[gb]z2?|xz|lzma|7z|zip|rar)$'
         # - '\.(rpm|deb|iso)$'
         # - '\.(jpe?g|gif|png|mov|avi|ogg|mkv|webm|mp[34g]|flv|flac|ape|pdf|djvu)$'
         # - '\.git/objects/[0-9a-f]+/[0-9a-f]+$'
+        # - [500, '\.(txt|md|rst|cat|(ba|z|k|c)?sh|env)$']
+        # - [500, '\.(cgi|py|pl|php|xml|xsl|css|x?html[45]?|js)$']
+        # - [500, '\.(co?nf|cfg?|li?st|ini|ya?ml|jso?n|vg|tab)(\.(sample|default|\w+-new))?$']
+        # - [500, '\.(unit|service|taget|mount|desktop|rules|rc|menu)$']
 
 
 http:
@@ -91,12 +100,14 @@ logging: # see http://docs.python.org/library/logging.config.html
       stream: ext://sys.stderr
       formatter: basic
       level: custom
-    # file:
-    #   class: logging.handlers.WatchedFileHandler
-    #   filename: /var/log/harvestd.log
+    # debug_logfile:
+    #   class: logging.handlers.RotatingFileHandler
+    #   filename: /srv/backups/debug.log
     #   formatter: basic
     #   encoding: utf-8
-    #   level: DEBUG
+    #   maxBytes: 5242880 # 5 MiB
+    #   backupCount: 2
+    #   level: NOISE
   # loggers:
   #   twisted:
   #     handlers: [console]

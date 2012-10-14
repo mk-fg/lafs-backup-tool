@@ -40,27 +40,30 @@ except ImportError:
 _re_type = type(re.compile(''))
 
 def check_filters(path, filters, default=True, log=None):
-	accept, path = default, '/' + path
+	path = '/' + path
 	for rule in filters:
 		try: x, pat = rule
-		except (TypeError, ValueError): x, pat = '-', rule
-		assert x in '+-', 'Only +/- pattern actions are allowed.'
+		except (TypeError, ValueError): x, pat = False, rule
 		if not isinstance(pat, _re_type): pat = re.compile(pat)
 		if pat.search(path):
 			# if log: log.noise('Path matched filter ({}, {}): {!r}'.format(x, pat.pattern, path))
-			accept = (x == '+')
-			break
-	return accept
+			return x
+	return default
 
 
 class FileEncoder(io.FileIO):
 
 	@classmethod
 	def choose(cls, path, conf):
-		if conf.xz.enabled\
-				and os.stat(path).st_size > conf.xz.min_size\
-				and check_filters(path, conf.xz.path_filter):
-			return 'xz', cls(path, **(conf.xz.options or dict()))
+		if conf.xz.enabled:
+			min_size = check_filters( path,
+				conf.xz.path_filter, default=conf.xz.min_size )
+			assert isinstance(min_size, (bool, int, long, float)),\
+				'Unrecognized xz path_filter result value: {}'.format(min_size)
+			if min_size is True: min_size = conf.xz.min_size
+			if min_size is None: min_size = False
+			if min_size is not False and os.stat(path).st_size >= min_size:
+				return 'xz', cls(path, **(conf.xz.options or dict()))
 		return None, open(path)
 
 	size = size_enc = 0
@@ -119,13 +122,15 @@ class LAFSBackup(LAFSOperation):
 	def __init__(self, conf):
 		super(LAFSBackup, self).__init__(conf)
 
-		_compile_filters = lambda filters: list(
-			( ('-', re.compile(pat))
-				if is_str(pat) else (pat[0], re.compile(pat[1])) )
+		_filter_actions = {'+': True, '-': False}
+		_compile_filters = lambda filters, c=lambda v: v: list(
+			( (False, re.compile(pat))
+				if is_str(pat) else (c(pat[0]), re.compile(pat[1])) )
 			for pat in (filters or list()) )
-		conf.filter = _compile_filters(conf.filter)
-		conf.destination.encoding.xz.path_filter =\
-			_compile_filters(conf.destination.encoding.xz.path_filter)
+
+		conf.filter = _compile_filters(conf.filter, lambda v, c=_filter_actions: c[v])
+		conf.destination.encoding.xz.path_filter = _compile_filters( # also allows size value
+			conf.destination.encoding.xz.path_filter, lambda v, c=_filter_actions: c.get(v, v) )
 
 		self.http = http.HTTPClient(**conf.http)
 		self.meta = meta.XMetaHandler()
