@@ -37,13 +37,31 @@ except ImportError:
 
 
 
+_re_type = type(re.compile(''))
+
+def check_filters(path, filters, default=True, log=None):
+	accept, path = default, '/' + path
+	for rule in filters:
+		try: x, pat = rule
+		except (TypeError, ValueError): x, pat = '-', rule
+		assert x in '+-', 'Only +/- pattern actions are allowed.'
+		if not isinstance(pat, _re_type): pat = re.compile(pat)
+		if pat.search(path):
+			if log: log.noise('Path matched filter ({}, {}): {!r}'.format(x, pat.pattern, path))
+			accept = (x == '+')
+			break
+	return accept
+
+
 class FileEncoder(io.FileIO):
 
 	@classmethod
 	def choose(cls, path, conf):
-		if conf.xz.enabled and os.stat(path).st_size > conf.xz.min_size:
+		if conf.xz.enabled\
+				and os.stat(path).st_size > conf.xz.min_size\
+				and check_filters(path, conf.xz.path_filter):
 			return 'xz', cls(path, **(conf.xz.options or dict()))
-		else: return None, open(path)
+		return None, open(path)
 
 	size = size_enc = 0
 	ratio = property(lambda s: (s.size_enc / float(s.size)) if s.size else 1)
@@ -102,10 +120,15 @@ class LAFSBackup(LAFSOperation):
 
 	def __init__(self, conf):
 		super(LAFSBackup, self).__init__(conf)
-		conf.filter = list(
+
+		_compile_filters = lambda filters: list(
 			( ('-', re.compile(pat))
 				if is_str(pat) else (pat[0], re.compile(pat[1])) )
-			for pat in (conf.filter or list()) )
+			for pat in (filters or list()) )
+		conf.filter = _compile_filters(conf.filter)
+		conf.destination.encoding.xz.path_filter =\
+			_compile_filters(conf.destination.encoding.xz.path_filter)
+
 		self.http = http.HTTPClient(**conf.http)
 		self.meta = meta.XMetaHandler()
 
@@ -314,15 +337,8 @@ class LAFSBackup(LAFSOperation):
 
 		def _error_handler(err): raise err
 
-		def _check_filter(path, filters=self.conf.filter):
-			accept, path = True, '/' + path
-			for x, pat in filters:
-				assert x in '+-', 'Only +/- pattern actions are allowed.'
-				if pat.search(path):
-					self.log.noise('Path matched filter ({}, {}): {!r}'.format(x, pat.pattern, path))
-					accept = (x == '+')
-					break
-			return accept
+		_check_filters = ft.partial(
+			check_filters, filters=self.conf.filter, log=self.log )
 
 		for path, dirs, files in os.walk('.', topdown=True, onerror=_error_handler):
 			p = path.lstrip('./')
@@ -332,14 +348,14 @@ class LAFSBackup(LAFSOperation):
 			for i, name in list(enumerate(dirs)):
 				path = join(p, name)
 				# Filtered-out dirs won't be descended into
-				if not _check_filter(path + '/'):
+				if not _check_filters(path + '/'):
 					del dirs[i - i_off]
 					i_off += 1 # original list just became shorter
 				elif os.path.islink(path): files.append(name)
 
 			for name in files:
 				path = join(p, name)
-				if not _check_filter(path): continue
+				if not _check_filters(path): continue
 				mode = os.lstat(path).st_mode
 				if not stat.S_ISREG(mode) and not stat.S_ISLNK(mode):
 					self.log.info('Skipping special path: {} (mode: {})'.format(path, oct(mode)))

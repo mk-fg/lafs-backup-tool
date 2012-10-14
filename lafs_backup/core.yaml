@@ -34,6 +34,13 @@ destination:
       enabled: true
       min_size: 5120 # don't compress files smaller than 5 KiB
       options: # see lzma.LZMAOptions, empty = module defaults
+      path_filter:
+        # List of include/exclude regexp path-rules, similar to filter section below.
+        # If none of the patterns match path, it is considered compressible.
+        # - '\.(gz|bz2|t[gb]z2?|xz|lzma|7z|zip|rar)$'
+        # - '\.(rpm|deb|iso)$'
+        # - '\.(jpe?g|gif|png|mov|avi|ogg|mkv|webm|mp[34g]|flv|flac|ape|pdf|djvu)$'
+        # - '\.git/objects/[0-9a-f]+/[0-9a-f]+$'
 
 
 http:
