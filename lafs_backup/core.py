@@ -117,7 +117,8 @@ class LAFSOperation(object):
 
 class LAFSBackup(LAFSOperation):
 
-	conf_required = 'source.path', 'source.queue', 'source.entry_cache.path'
+	conf_required = 'source.path',\
+		'source.queue.path', 'source.entry_cache.path'
 
 	def __init__(self, conf):
 		super(LAFSBackup, self).__init__(conf)
@@ -191,21 +192,27 @@ class LAFSBackup(LAFSOperation):
 
 	@defer.inlineCallbacks
 	def run(self):
-		path_queue = abspath(self.conf.source.queue)
+		path_queue = abspath(self.conf.source.queue.path)
 		path = self.pick_path()
 		self.log.debug('Using source path: {}'.format(path))
 		if not path:
 			self.log.warn('No (or non-existing) path to backup specified, exiting')
 			defer.returnValue(None)
 
+		if self.conf.source.queue.check_mtime\
+				and os.stat(path_queue).st_mtime > os.stat(path).st_mtime:
+			self.log.debug( 'Reusing queue-file (newer'
+				' mtime than source path): {}'.format(path_queue) )
+			self.conf.operation.reuse_queue = True
+
 		path_origin, root_cap = os.getcwd(), None
 		os.chdir(path)
 
-		if not self.conf.debug.reuse_queue:
+		if not self.conf.operation.reuse_queue:
 			self.log.debug('Building queue file: {}'.format(path_queue))
 			self.build_queue(path, path_queue)
 
-		if not self.conf.debug.queue_only:
+		if not self.conf.operation.queue_only:
 			self.log.debug('Uploading stuff from queue file: {}'.format(path_queue))
 			root_cap = (yield self.backup_queue(basename(path), path_queue))\
 
@@ -281,7 +288,7 @@ class LAFSBackup(LAFSOperation):
 						meta, size = ['symlink:' + contents], len(contents)
 					dc = duplicate_check(obj, [path] + meta)
 					cap = dc.use()\
-						if not self.conf.debug.disable_deduplication else None
+						if not self.conf.operation.disable_deduplication else None
 					if not cap:
 						ts, cap = yield stopwatch_wrapper(self.update_file, contents)
 						dc.set(cap)
@@ -299,7 +306,7 @@ class LAFSBackup(LAFSOperation):
 					dc = duplicate_check( obj,
 						map(op.itemgetter('cap'), contents.viewvalues()) )
 					cap = dc.use()\
-						if not self.conf.debug.disable_deduplication else None
+						if not self.conf.operation.disable_deduplication else None
 					if not cap:
 						ts, cap = yield stopwatch_wrapper(self.update_dir, contents)
 						dc.set(cap)
@@ -478,7 +485,7 @@ class LAFSCleanup(LAFSOperation):
 
 
 
-def main(argv=None):
+def main(argv=None, config=None):
 	import argparse
 	parser = argparse.ArgumentParser(
 		description='LAFS backup tool.')
@@ -527,13 +534,15 @@ def main(argv=None):
 
 	optz = parser.parse_args(argv or sys.argv[1:])
 
-	## Read configuration files
-	from twisted.python import log as twisted_log
+	## Read configuration
 	cfg = lya.AttrDict.from_yaml('{}.yaml'.format(
 		os.path.splitext(os.path.realpath(__file__))[0] ))
 	for k in optz.config: cfg.update_yaml(k)
+	if config: cfg.update_dict(config)
 
 	## Logging
+	from twisted.python import log as twisted_log
+
 	noise = logging.NOISE = logging.DEBUG - 1
 	logging.addLevelName(noise, 'NOISE')
 	def noise(self, msg, noise=noise):
@@ -551,17 +560,17 @@ def main(argv=None):
 	## Operation-specific CLI processing
 	if optz.call == 'backup':
 		if optz.disable_deduplication:
-			cfg.debug.disable_deduplication = optz.disable_deduplication
+			cfg.operation.disable_deduplication = optz.disable_deduplication
 		if optz.queue_only:
 			if optz.queue_only is not True:
-				cfg.source.queue = optz.queue_only
-			cfg.debug.queue_only = optz.queue_only
+				cfg.source.queue.path = optz.queue_only
+			cfg.operation.queue_only = optz.queue_only
 		elif cfg.destination.encoding.xz.enabled and not lzma:
 			raise ImportError('Missing lzma module')
 		if optz.reuse_queue:
 			if optz.reuse_queue is not True:
-				cfg.source.queue = optz.reuse_queue
-			cfg.debug.reuse_queue = optz.reuse_queue
+				cfg.source.queue.path = optz.reuse_queue
+			cfg.operation.reuse_queue = optz.reuse_queue
 
 		op = LAFSBackup(cfg).run
 

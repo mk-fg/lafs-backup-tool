@@ -5,8 +5,12 @@
 source:
   # Path or glob pattern (to match path) to backup, required
   path: # example: /srv/backups/weekly.*
-  # Path to intermediate backup queue-file (list of paths to upload)
-  queue: # example: /srv/backups/queue.txt
+
+  queue:
+    # Path to intermediate backup queue-file (list of paths to upload), required
+    path: # example: /srv/backups/queue.txt
+    # Don't rebuild queue-file if it's newer than source.path
+    check_mtime: true
 
   entry_cache:
     # Path to persistent db of remote directory nodes, required
@@ -45,6 +49,7 @@ destination:
         # - '\.(gz|bz2|t[gb]z2?|xz|lzma|7z|zip|rar)$'
         # - '\.(rpm|deb|iso)$'
         # - '\.(jpe?g|gif|png|mov|avi|ogg|mkv|webm|mp[34g]|flv|flac|ape|pdf|djvu)$'
+        # - '\.(sqlite3?|fossil|fsl)$'
         # - '\.git/objects/[0-9a-f]+/[0-9a-f]+$'
         # - [500, '\.(txt|md|rst|cat|(ba|z|k|c)?sh|env)$']
         # - [500, '\.(cgi|py|pl|php|xml|xsl|css|x?html[45]?|js)$']
@@ -80,7 +85,7 @@ filter:
   # - '/=(RELEASE-ID|meta-update|update)$'
 
 
-debug:
+operation:
   queue_only: false # only generate upload queue file, don't upload anything
   reuse_queue: false # don't generate upload queue file, use existing one as-is
   disable_deduplication: false # make no effort to de-duplicate data (should still work on tahoe-level for files)

@@ -59,7 +59,8 @@ Resulting config file might look something like this:
 
 	source:
 	  path: /srv/backups/backup.*
-	  queue: /srv/backups/tmp/queue.txt
+	  queue:
+	    path: /srv/backups/tmp/queue.txt
 	  entry_cache:
 	    path: /srv/backups/tmp/dentries.db
 
