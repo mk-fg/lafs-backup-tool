@@ -51,10 +51,11 @@ destination:
         # - '\.(jpe?g|gif|png|mov|avi|ogg|mkv|webm|mp[34g]|flv|flac|ape|pdf|djvu)$'
         # - '\.(sqlite3?|fossil|fsl)$'
         # - '\.git/objects/[0-9a-f]+/[0-9a-f]+$'
-        # - [500, '\.(txt|md|rst|cat|(ba|z|k|c)?sh|env)$']
-        # - [500, '\.(cgi|py|pl|php|xml|xsl|css|x?html[45]?|js)$']
+        # - [500, '\.(txt|csv|log|md|rst|cat|(ba|z|k|c|fi)?sh|env)$']
+        # - [500, '\.(cgi|py|p[lm]|php|c|h|[ce]l|lisp|hs|patch|diff|xml|xsl|css|x?html[45]?|js)$']
         # - [500, '\.(co?nf|cfg?|li?st|ini|ya?ml|jso?n|vg|tab)(\.(sample|default|\w+-new))?$']
         # - [500, '\.(unit|service|taget|mount|desktop|rules|rc|menu)$']
+        # - [2000, '^/etc/']
 
 
 http:
