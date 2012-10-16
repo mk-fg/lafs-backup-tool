@@ -134,6 +134,18 @@ want, missing only the following features:
 
 * Just a cleaner rewrite, as a base for any future ideas.
 
+Some additional ideas that came after the initial implementation:
+
+* Rate limiting.
+
+	Necessary with free-cloud APIs, which tend to block too frequent requests, but
+	might also be useful to reduce system load due to compression or crypto,
+	network load.
+
+	Might potentially be pushed down to tahoe node at some point, e.g. to a
+	backend driver (since backend imposes such limitations) or maybe to a more
+	generic code junction (so it'd be applicable to any backend).
+
 
 
 Implementation details

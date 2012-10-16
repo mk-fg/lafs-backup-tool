@@ -241,6 +241,25 @@ class LAFSBackup(LAFSOperation):
 		self.log.debug('Backup generation number: {}'.format(entry_cache_gen))
 		self.entry_cache['generation'] = json.dumps(entry_cache_gen)
 
+		ts_start = time()
+		c_bytes = c_objs = 0
+		rate_limits = self.conf.operation.rate_limit
+		rate_limits_enabled = rate_limits.interval\
+			and (rate_limits.bytes or rate_limits.objects)
+
+		def rate_limit_check(metric, val, interval=rate_limits.interval):
+			rate_max = getattr(rate_limits, metric, None) or 0
+			if rate_max <= 0: return
+			ts_diff = float(time() - ts_start) / interval
+			rate = val / ts_diff
+			if rate > rate_max:
+				delay = ( (val - rate_max * ts_diff) / rate_max ) * interval
+				d = defer.Deferred()
+				reactor.callLater(delay, d.callback, None)
+				self.log.noise( 'Introducing rate-limiting delay (metric:'
+					' {}, rate: {:.1f}, rate_max: {:.1f}): {:.1f}s'.format(metric, rate, rate_max, delay) )
+				return d
+
 		class duplicate_check(object):
 
 			# Not checking if the actual node is healthy - should be done separately
@@ -296,6 +315,8 @@ class LAFSBackup(LAFSOperation):
 							'Uploaded file (time: {:.1f}s, size: {}, enc: {}): /{}'\
 							.format(ts, size, '{}[{:.2f}]'.format(
 								enc, contents.ratio ) if enc else 'no', path) )
+						c_bytes += size
+						c_objs += 1
 					else:
 						self.log.noise('Skipping path as duplicate: {}'.format(path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
@@ -313,7 +334,13 @@ class LAFSBackup(LAFSOperation):
 						self.log.noise(
 							'Created dirnode (time: {:.1f}s, nodes: {}): /{}'\
 							.format(ts, len(contents), path) )
+						c_objs += 1
 					obj['cap'], nodes[path_dir][name] = cap, obj
+
+				# Check rate-limiting and introduce delay, if necessary
+				if rate_limits_enabled:
+					yield rate_limit_check('bytes', c_bytes)
+					yield rate_limit_check('objects', c_objs)
 
 		root = nodes.pop('')[backup_name]
 		self.entry_cache['root:' + root['cap']] = json.dumps((

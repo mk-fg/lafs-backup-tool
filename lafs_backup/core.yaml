@@ -1,6 +1,8 @@
 ### Default (baseline) configuration parameters.
 ### DO NOT ever change this config, use -c commandline option instead!
 
+# Note that this file is YAML, so YAML types can be used here, see http://yaml.org/type/
+# For instance, large number can be specified as "10_000_000" or "!!float 10e6".
 
 source:
   # Path or glob pattern (to match path) to backup, required
@@ -15,7 +17,7 @@ source:
   entry_cache:
     # Path to persistent db of remote directory nodes, required
     path: # example: /srv/backups/dentries.db
-    delete_batch: 10000 # buffer key deletes, 0 or false for no limit
+    delete_batch: 10_000 # buffer key deletes, 0 or false for no limit
 
   # How to pick a path among those matched by "path" glob
   pick_policy: alphasort_last # only one supported
@@ -90,6 +92,15 @@ operation:
   queue_only: false # only generate upload queue file, don't upload anything
   reuse_queue: false # don't generate upload queue file, use existing one as-is
   disable_deduplication: false # make no effort to de-duplicate data (should still work on tahoe-level for files)
+
+  # Rate limiting might be useful to avoid excessive cpu/net usage on nodes,
+  #  and especially when uploading to rate-limited api's (like free cloud storages).
+  # Only used when uploading objects to the grid, not when building queue file.
+  # Currently these use total rates (for the whole operation), but that will probably change.
+  rate_limit:
+    bytes: # max number of *file* bytes to upload per interval, example: 30_000_000
+    objects: # max number of objects to upload within one interval, example: 5
+    interval: 60 # 1 minute
 
 
 logging: # see http://docs.python.org/library/logging.config.html
