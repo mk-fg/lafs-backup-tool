@@ -538,7 +538,9 @@ def main(argv=None, config=None):
 			help='Make sure to remove all the previous known backups / generations as well.')
 		cmd.add_argument('-g', '--generation',
 			action='append', type=int, default=list(),
-			help='Also remove specified backup generations. Affected by --up-to option.')
+			help='Also remove specified backup generations. Affected by --up-to option.'
+				' If no URIs (or "-") will be specified as arguments, stdin stream wont be scanned'
+				' for them and only specified (with this option) backup generations will be removed.')
 
 	with subcommand('list', help='List known finished backups.') as cmd:
 		cmd.add_argument('-g', '--generations',
@@ -594,7 +596,7 @@ def main(argv=None, config=None):
 
 	elif optz.call == 'cleanup':
 		caps = set(optz.root_cap).difference({'-'})
-		if not optz.root_cap or '-' in optz.root_cap:
+		if (not optz.generation and not optz.root_cap) or '-' in optz.root_cap:
 			caps.update(it.ifilter(None, (line.strip() for line in sys.stdin)))
 		op = LAFSCleanup(cfg, caps, optz.generation, optz.up_to).run
 
