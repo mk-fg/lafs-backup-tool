@@ -469,8 +469,9 @@ class LAFSList(LAFSOperation):
 		for i, bak in enumerate( self.entry_cache\
 				.backup_get_gen(gen_max, exact=False) ):
 			if i: print()
-			print(( 'Backup: {0[name]}\n  cap: {0[cap]}\n'
-				'  generation: {0[generation]}' ).format(bak))
+			print(( 'Backup: {0[name]}\n  cap: {0[cap]}\n  generation:'
+				' {0[generation]}\n  timestamp: {1}' ).format(
+					bak, datetime.fromtimestamp(bak['ts']).isoformat() ))
 			gens.add(bak['generation'])
 
 		if self.list_dangling_gens is not None:
@@ -529,7 +530,10 @@ def main(argv=None, config=None):
 			help='Make no effort to de-duplicate data (should still work on tahoe-level for files).')
 
 	with subcommand('cleanup',
-			help='Remove the backup from LAFS and local caches.') as cmd:
+			help='Remove the backup from local caches and unlink from'
+					' LAFS destination mutable directory (if configured).'
+				' Purpose is to make local system (and accessible from it lafs path) "forget"'
+					' about specified backups, not to actually remove any backed-up data.') as cmd:
 		cmd.add_argument('root_cap',
 			nargs='*', metavar='LAFS-URI', default=list(),
 			help='LAFS URI(s) of the backup(s) to remove.'
@@ -545,9 +549,9 @@ def main(argv=None, config=None):
 	with subcommand('list', help='List known finished backups.') as cmd:
 		cmd.add_argument('-g', '--generations',
 			action='append', type=int, nargs='*',
-			help='Also list dangling entries with generation numbers not linked'
-				' to any finished backup. More specific generation numbers can be'
-				' specified as an arguments to only list these.')
+			help='Also list dangling entries in cache with generation numbers'
+				' not linked to any finished backup. More specific generation numbers'
+				' can be specified as an arguments to only list these.')
 
 	with subcommand('dump_config',
 		help='Dump configuration to stdout and exit.') as cmd: pass

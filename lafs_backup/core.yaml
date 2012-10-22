@@ -15,8 +15,8 @@ source:
     check_mtime: true
 
   entry_cache:
-    # Path to persistent db of remote directory nodes, required
-    path: # example: /srv/backups/dentries.db
+    # Path to persistent db (sqlite) of remote directory nodes, required
+    path: # example: /srv/backups/dentries.sqlite
 
   # How to pick a path among those matched by "path" glob
   pick_policy: alphasort_last # only one supported

@@ -32,7 +32,7 @@ without any installation.
 
 ### Requirements
 
-* [Python 2.7 (not 3.X)](http://python.org)
+* [Python 2.7 (not 3.X)](http://python.org) with sqlite3 support
 * [layered-yaml-attrdict-config](https://github.com/mk-fg/layered-yaml-attrdict-config)
 * [Twisted](http://twistedmatrix.com) (core components)
 * [CFFI](http://cffi.readthedocs.org) (for fs ACL and capabilities support)
@@ -77,7 +77,11 @@ disabled in config, printed to stdout.
 
 If/when old backup files will be removed from LAFS, `lafs-backup-tool cleanup`
 command should be used to purge removed entries from deduplication cache
-("entry_cache" settings), unless "disable_deduplication" option is used.
+("entry_cache" settings), unless "disable_deduplication" option is used (in
+which case no such cleanup is necessary).
+
+`lafs-backup-tool list` command can be used to list finished backups, recorded
+in "entry_cache" db file along with their URIs.
 
 CLI reference can be produced by running `lafs-backup-tool --help`.
 For command-specific options, command in question must be specified,
@@ -176,7 +180,7 @@ Only immutable lafs files/dirnodes are used at the moment.
 * Phase two: read queue-file line-by-line and upload each file (checking if it's
 	not uploaded already) or create a directory entry to/on the grid.
 
-	Each uploaded node (and it's ro-cap) gets recorded in "entry_cache" dbm file,
+	Each uploaded node (and it's ro-cap) gets recorded in "entry_cache" sqlite db,
 	keyed by all the relevant metadata (mtime, size, xattrs, file-path,
 	contents-caps, etc), to facilitate both restarts and deduplication.
 
@@ -271,6 +275,10 @@ It can be printed to stdout (which isn't used otherwise, though logging can be
 configured to use it), appended to some text file or be put into some
 higher-level mutable directory (with a basename of a source path).
 
+Other than that, it also gets recorded to "entry_cache" db along with generation
+number for this particular backup, so that it can later be removed along with
+all the files unique to it through the cleanup procedure.
+
 See "destination.result" section of the [base
 config](https://github.com/mk-fg/lafs-backup-tool/blob/master/lafs_backup/core.yaml)
 for more info on these.
@@ -284,8 +292,8 @@ though it was read from local disk initially.
 * "result" destination (stdout, file or some mutable tahoe dir - see above),
 	naturally.
 
-* Deduplication "entry_cache" dbm file (path is required to be set in
-	"source.entry_cache").
+* Deduplication "entry_cache" db (path is required to be set in
+  "source.entry_cache").
 
 	That file is queried for the actual plaintext caps, so it's impossible to use
 	hashed (or otherwise irreversibly-mapped) values there.
@@ -306,7 +314,7 @@ should be done:
 	Naturally, if cap was linked to some other directory node manually, it won't
 	be removed by the command.
 
-* "entry_cache" dbm removed or encrypted in a similar fashion or "cleanup"
+* "entry_cache" db removed or encrypted in a similar fashion or "cleanup"
 	command is used.
 
 	"cleanup" command gets generation number, corresponding to the backup root cap
@@ -319,7 +327,7 @@ should be done:
 * If any debug logging was enabled, these logs should be purged, as they may
 	leak various info about the paths and source file/dir metadata.
 
-One should also (naturally) beware of dbm (if it doesn't get removed),
+One should also (naturally) beware of sqlite (if it doesn't get removed),
 filesystem or underlying block device (e.g. solid-state drives) retaining the
 thought-to-be-removed data.
 
