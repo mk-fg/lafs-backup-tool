@@ -520,12 +520,17 @@ def main(argv=None, config=None):
 		yield cmd
 
 	with subcommand('backup', help='Backup data to LAFS.') as cmd:
-		cmd.add_argument('--queue-only', nargs='?', metavar='path',
+		cmd.add_argument('--queue-only',
+			nargs='?', metavar='path', default=False,
 			help='Only generate upload queue file (path can'
 				' be specified as an optional argument) and stop there.')
-		cmd.add_argument('--reuse-queue', nargs='?', metavar='path',
+		cmd.add_argument('--reuse-queue',
+			nargs='?', metavar='path', default=False,
 			help='Do not generate upload queue file, use'
 				' existing one (path can be specified as an argument) as-is.')
+		cmd.add_argument('-f', '--force-queue-rebuild', action='store_true',
+			help='Force upload queue file rebuild,'
+				' even if one already exists and is recent enough to be reused.')
 		cmd.add_argument('--disable-deduplication', action='store_true',
 			help='Make no effort to de-duplicate data (should still work on tahoe-level for files).')
 
@@ -585,17 +590,21 @@ def main(argv=None, config=None):
 	if optz.call == 'backup':
 		if optz.disable_deduplication:
 			cfg.operation.disable_deduplication = optz.disable_deduplication
-		if optz.queue_only:
-			if optz.queue_only is not True:
+		if optz.force_queue_rebuild:
+			cfg.source.queue.check_mtime = False
+		if optz.queue_only is not False:
+			if optz.queue_only is not None:
 				cfg.source.queue.path = optz.queue_only
 			cfg.operation.queue_only = optz.queue_only
 		elif cfg.destination.encoding.xz.enabled and not lzma:
-			raise ImportError('Missing lzma module')
-		if optz.reuse_queue:
-			if optz.reuse_queue is not True:
+			raise ImportError('Unable to import lzma module')
+		if optz.reuse_queue is not False:
+			if optz.force_queue_rebuild:
+				parser.error('Options --force-queue-rebuild'
+					' and --reuse-queue cannot be used together.')
+			if optz.reuse_queue is not None:
 				cfg.source.queue.path = optz.reuse_queue
 			cfg.operation.reuse_queue = optz.reuse_queue
-
 		op = LAFSBackup(cfg).run
 
 	elif optz.call == 'cleanup':
