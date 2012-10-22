@@ -312,6 +312,8 @@ class LAFSBackup(LAFSOperation):
 							'Created dirnode (time: {:.1f}s, nodes: {}): /{}'\
 							.format(ts, len(contents), path) )
 						c_objs += 1
+					else:
+						self.log.noise('Skipping path as duplicate: {}'.format(path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
 
 				# Check rate-limiting and introduce delay, if necessary
