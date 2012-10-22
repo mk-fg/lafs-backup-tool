@@ -93,6 +93,28 @@ def stopwatch_wrapper(func, *argz, **kwz):
 	defer.returnValue((time() - ts, res))
 
 
+def token_bucket(metric, spec):
+	try:
+		try: interval, burst = spec.rsplit(':', 1)
+		except ValueError: burst = 1.0
+		else: burst = float(burst)
+		try: a, b = interval.split('/', 1)
+		except ValueError: interval = float(interval)
+		else: interval = op.truediv(*it.imap(float, [a, b]))
+		if min(interval, burst) < 0: raise ValueError()
+	except:
+		raise ValueError('Invalid format for rate limit (metric: {}): {!r}'.format(metric, spec))
+
+	tokens, rate, ts_sync = burst, interval**-1, time()
+	val = yield
+	while True:
+		ts = time()
+		ts_sync, tokens = ts, min(burst, tokens + (ts - ts_sync) * rate)
+		val, tokens = (None, tokens - val)\
+			if tokens >= val else ((val - tokens) / rate, tokens)
+		val = yield val
+
+
 
 class LAFSOperation(object):
 
@@ -239,23 +261,18 @@ class LAFSBackup(LAFSOperation):
 		generation = self.entry_cache.get_new_generation()
 		self.log.debug('Backup generation number: {}'.format(generation))
 
-		ts_start = time()
-		c_bytes = c_objs = 0
 		rate_limits = self.conf.operation.rate_limit
-		rate_limits_enabled = rate_limits.interval\
-			and (rate_limits.bytes or rate_limits.objects)
+		rate_limits_enabled = rate_limits.bytes or rate_limits.objects
 
-		def rate_limit_check(metric, val, interval=rate_limits.interval):
-			rate_max = getattr(rate_limits, metric, None) or 0
-			if rate_max <= 0: return
-			ts_diff = float(time() - ts_start) / interval
-			rate = val / ts_diff
-			if rate > rate_max:
-				delay = ( (val - rate_max * ts_diff) / rate_max ) * interval
+		def rate_limit_check(metric, val=1):
+			tb = getattr(rate_limits, metric, None)
+			if not tb: return
+			delay = tb.send(val)
+			if delay:
 				d = defer.Deferred()
 				reactor.callLater(delay, d.callback, None)
-				self.log.noise( 'Introducing rate-limiting delay (metric:'
-					' {}, rate: {:.1f}, rate_max: {:.1f}): {:.1f}s'.format(metric, rate, rate_max, delay) )
+				self.log.noise('Introducing rate-limiting'
+					' delay (metric: {}): {:.1f}s'.format(metric, delay))
 				return d
 
 		with open(path_queue) as queue:
@@ -271,6 +288,8 @@ class LAFSBackup(LAFSOperation):
 				else:
 					path_dir, name = dirname(path), basename(path)
 				cap, obj = None, self.meta_load(obj)
+
+				sent = defaultdict(int)
 
 				if not stat.S_ISDIR(int(obj.get('mode', '0'), 8)):
 					# File(-like) node
@@ -294,8 +313,8 @@ class LAFSBackup(LAFSOperation):
 							'Uploaded file (time: {:.1f}s, size: {}, enc: {}): /{}'\
 							.format(ts, size, '{}[{:.2f}]'.format(
 								enc, contents.ratio ) if enc else 'no', path) )
-						c_bytes += size
-						c_objs += 1
+						sent['bytes'] += size
+						sent['objects'] += 1
 					else:
 						self.log.noise('Skipping path as duplicate: {}'.format(path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
@@ -314,15 +333,15 @@ class LAFSBackup(LAFSOperation):
 						self.log.noise(
 							'Created dirnode (time: {:.1f}s, nodes: {}): /{}'\
 							.format(ts, len(contents), path) )
-						c_objs += 1
+						sent['objects'] += 1
 					else:
 						self.log.noise('Skipping path as duplicate: {}'.format(path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
 
 				# Check rate-limiting and introduce delay, if necessary
-				if rate_limits_enabled:
-					yield rate_limit_check('bytes', c_bytes)
-					yield rate_limit_check('objects', c_objs)
+				if sent and rate_limits_enabled:
+					for metric, val in sent.viewitems():
+						yield rate_limit_check(metric, val)
 
 		root = nodes.pop('')[backup_name]
 		self.entry_cache.backup_add(backup_name, root['cap'], generation)
@@ -595,12 +614,21 @@ def main(argv=None, config=None):
 			cfg.operation.disable_deduplication = optz.disable_deduplication
 		if optz.force_queue_rebuild:
 			cfg.source.queue.check_mtime = False
+
 		if optz.queue_only is not False:
 			if optz.queue_only is not None:
 				cfg.source.queue.path = optz.queue_only
 			cfg.operation.queue_only = optz.queue_only
-		elif cfg.destination.encoding.xz.enabled and not lzma:
-			raise ImportError('Unable to import lzma module')
+		else:
+			# Check some paramaters, used in the upload phase
+			if cfg.destination.encoding.xz.enabled and not lzma:
+				raise ImportError('Unable to import lzma module')
+			for metric, spec in cfg.operation.rate_limit.viewitems():
+				if spec:
+					spec = token_bucket(metric, spec)
+					next(spec)
+					cfg.operation.rate_limit[metric] = spec
+
 		if optz.reuse_queue is not False:
 			if optz.force_queue_rebuild:
 				parser.error('Options --force-queue-rebuild'
@@ -608,6 +636,7 @@ def main(argv=None, config=None):
 			if optz.reuse_queue is not None:
 				cfg.source.queue.path = optz.reuse_queue
 			cfg.operation.reuse_queue = optz.reuse_queue
+
 		op = LAFSBackup(cfg).run
 
 	elif optz.call == 'cleanup':

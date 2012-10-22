@@ -95,11 +95,17 @@ operation:
   # Rate limiting might be useful to avoid excessive cpu/net usage on nodes,
   #  and especially when uploading to rate-limited api's (like free cloud storages).
   # Only used when uploading objects to the grid, not when building queue file.
-  # Currently these use total rates (for the whole operation), but that will probably change.
+  # Format of each value is "interval[:burst]", where "interval" can be specified as rate (e.g. "1/3e5").
+  # Simple token bucket algorithm is used. Empty values mean "no limit".
+  # Examples:
+  #   "objects: 1/10:50" - 10 objects per second, up to 50 at once (if rate was lower before).
+  #   "objects: 0.1:50" - same as above.
+  #   "objects: 10:20" - 1 object in 10 seconds, up to 20 at once.
+  #   "objects: 5" - make interval between object uploads equal 5 seconds.
+  #   "bytes: 1/3e6:50e6" - 3 MB/s max, up to 50 MB/s if connection was underutilized before.
   rate_limit:
-    bytes: # max number of *file* bytes to upload per interval, example: 30_000_000
-    objects: # max number of objects to upload within one interval, example: 5
-    interval: 60 # 1 minute
+    bytes: # limit on rate of *file* bytes upload, example: 1/3e5:20e6
+    objects: # limit on rate of uploaded objects, example: 10:50
 
 
 logging: # see http://docs.python.org/library/logging.config.html
