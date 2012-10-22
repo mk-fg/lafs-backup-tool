@@ -196,11 +196,14 @@ class LAFSBackup(LAFSOperation):
 			self.log.warn('No (or non-existing) path to backup specified, exiting')
 			defer.returnValue(None)
 
-		if self.conf.source.queue.check_mtime\
-				and os.stat(path_queue).st_mtime > os.stat(path).st_mtime:
-			self.log.debug( 'Reusing queue-file (newer'
-				' mtime than source path): {}'.format(path_queue) )
-			self.conf.operation.reuse_queue = True
+		if self.conf.source.queue.check_mtime:
+			try: queue_mtime = os.stat(path_queue).st_mtime
+			except OSError: pass
+			else:
+				if queue_mtime >= os.stat(path).st_mtime:
+					self.log.debug( 'Reusing queue-file (newer'
+						' mtime than source path): {}'.format(path_queue) )
+					self.conf.operation.reuse_queue = True
 
 		path_origin, root_cap = os.getcwd(), None
 		os.chdir(path)
