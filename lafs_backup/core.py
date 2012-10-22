@@ -12,7 +12,6 @@ from subprocess import Popen, PIPE
 from contextlib import contextmanager
 from time import time
 import os, sys, io, fcntl, stat, re, types, logging
-import anydbm, whichdb
 
 from twisted.internet import reactor, defer
 import lya
@@ -22,19 +21,13 @@ is_str = lambda obj,s=types.StringTypes: isinstance(obj, s)
 try: import lzma
 except ImportError: lzma = None
 
-try: import anyjson as json
-except ImportError:
-	try: import simplejson as json
-	except ImportError: import json
-
-try: from lafs_backup import http, meta
+try: from lafs_backup import http, meta, db
 except ImportError:
 	# Make sure it works from a checkout
 	if isdir(join(dirname(__file__), 'lafs_backup'))\
 			and exists(join(dirname(__file__), 'setup.py')):
 		sys.path.insert(0, dirname(__file__))
-		from lafs_backup import http, meta
-
+	from lafs_backup import http, meta, db
 
 
 _re_type = type(re.compile(''))
@@ -104,21 +97,27 @@ def stopwatch_wrapper(func, *argz, **kwz):
 class LAFSOperation(object):
 
 	conf_required = None
+	conf_required_init = 'source.entry_cache.path',
 
 	def __init__(self, conf):
 		self.conf = conf
+		self.conf_required = list(self.conf_required or list())
+		self.conf_required.extend(list(self.conf_required_init) or list())
 		if self.conf_required:
 			assert all(op.attrgetter(k)(self.conf) for k in self.conf_required),\
 				'Missing some required configuration'\
 					' parameters, one of: {}'.format(', '.join(self.conf_required))
 		self.log = logging.getLogger(self.__class__.__name__)
 
+		sql_log = logging.getLogger('lafs_backup.EntryCacheDB')\
+			if conf.logging.sql_queries else None
+		self.entry_cache = db.EntryCacheDB(conf.source.entry_cache.path, log=sql_log)
+
 
 
 class LAFSBackup(LAFSOperation):
 
-	conf_required = 'source.path',\
-		'source.queue.path', 'source.entry_cache.path'
+	conf_required = 'source.path', 'source.queue.path'
 
 	def __init__(self, conf):
 		super(LAFSBackup, self).__init__(conf)
@@ -135,8 +134,6 @@ class LAFSBackup(LAFSOperation):
 
 		self.http = http.HTTPClient(**conf.http)
 		self.meta = meta.XMetaHandler()
-
-		self.entry_cache = anydbm.open(conf.source.entry_cache.path, 'c')
 
 
 	def pick_path(self):
@@ -236,10 +233,8 @@ class LAFSBackup(LAFSOperation):
 	@defer.inlineCallbacks
 	def backup_queue(self, backup_name, path_queue):
 		nodes = defaultdict(dict)
-
-		entry_cache_gen = json.loads(self.entry_cache.get('generation', '0')) + 1
-		self.log.debug('Backup generation number: {}'.format(entry_cache_gen))
-		self.entry_cache['generation'] = json.dumps(entry_cache_gen)
+		generation = self.entry_cache.get_new_generation()
+		self.log.debug('Backup generation number: {}'.format(generation))
 
 		ts_start = time()
 		c_bytes = c_objs = 0
@@ -259,26 +254,6 @@ class LAFSBackup(LAFSOperation):
 				self.log.noise( 'Introducing rate-limiting delay (metric:'
 					' {}, rate: {:.1f}, rate_max: {:.1f}): {:.1f}s'.format(metric, rate, rate_max, delay) )
 				return d
-
-		class duplicate_check(object):
-
-			# Not checking if the actual node is healthy - should be done separately
-			def __init__( self, obj, extras=None,
-					_ec=self.entry_cache, _md=self.meta_dump, _log=self.log ):
-				self.ec, self.gen = _ec, json.loads(_ec['generation'])
-				self.key = _md(obj)
-				if extras: self.key += '\0' + '\0'.join(extras)
-				# _log.noise('Deduplication key dump: {!r}'.format(self.key))
-
-			def use(self):
-				try: cap = self.ec[dc.key]
-				except KeyError: return None
-				gen, cap = json.loads(cap)
-				return self.set(cap)
-
-			def set(self, cap):
-				self.ec[dc.key] = json.dumps((self.gen, cap))
-				return cap
 
 		with open(path_queue) as queue:
 			for line in queue:
@@ -305,7 +280,8 @@ class LAFSBackup(LAFSOperation):
 					else: # symlink
 						enc, contents = None, os.readlink(path)
 						meta, size = ['symlink:' + contents], len(contents)
-					dc = duplicate_check(obj, [path] + meta)
+					dc = self.entry_cache.duplicate_check(
+						self.meta_dump(obj), generation, [path] + meta )
 					cap = dc.use()\
 						if not self.conf.operation.disable_deduplication else None
 					if not cap:
@@ -324,7 +300,8 @@ class LAFSBackup(LAFSOperation):
 				else:
 					# Directory node
 					contents = nodes.pop(path, dict())
-					dc = duplicate_check( obj,
+					dc = self.entry_cache.duplicate_check(
+						self.meta_dump(obj), generation,
 						map(op.itemgetter('cap'), contents.viewvalues()) )
 					cap = dc.use()\
 						if not self.conf.operation.disable_deduplication else None
@@ -343,8 +320,7 @@ class LAFSBackup(LAFSOperation):
 					yield rate_limit_check('objects', c_objs)
 
 		root = nodes.pop('')[backup_name]
-		self.entry_cache['root:' + root['cap']] = json.dumps((
-			json.loads(self.entry_cache['generation']), backup_name ))
+		self.entry_cache.backup_add(backup_name, root['cap'], generation)
 		defer.returnValue(root['cap'])
 
 	def update_file(self, data):
@@ -405,11 +381,9 @@ class LAFSBackup(LAFSOperation):
 
 class LAFSCleanup(LAFSOperation):
 
-	conf_required = 'source.entry_cache.path',
-
-	def __init__(self, conf, caps, with_history=False):
+	def __init__(self, conf, caps, gens, with_history=False):
 		super(LAFSCleanup, self).__init__(conf)
-		self.caps, self.with_history = caps, with_history
+		self.caps, self.gens, self.with_history = caps, gens, with_history
 
 		self.delete_from_lafs_dir = self.delete_from_file = None
 		if conf.destination.result.append_to_lafs_dir:
@@ -427,88 +401,93 @@ class LAFSCleanup(LAFSOperation):
 		if conf.destination.result.append_to_file:
 			self.delete_from_file = conf.destination.result.append_to_file
 
-		self.entry_cache = anydbm.open(conf.source.entry_cache.path, 'c')
-		self.entry_cache_t = whichdb.whichdb(conf.source.entry_cache.path)
-		self.delete_batch = conf.source.entry_cache.delete_batch
-
-	def iter_entry_cache(self):
-		# A can of hacks to work with dbm salad
-		if self.entry_cache_t in ['bsddb185', 'dbhash']:
-			k_prev, (k, v) = None, self.entry_cache.first()
-			while k != k_prev:
-				yield k
-				try: k_prev, (k, v) = k, self.entry_cache.next()
-				except KeyError: break
-		elif self.entry_cache_t in ['dbm', 'gdbm']:
-			k, n = self.entry_cache.firstkey(), self.entry_cache.nextkey
-			while k is not None:
-				yield k
-				k = n(k)
-		elif self.entry_cache_t == 'dumbdbm':
-			for k in self.entry_cache.keys(): yield k
-		else:
-			raise TypeError('Unrecognized dbm type: {!r}'.format(self.entry_cache_t))
-
 	@defer.inlineCallbacks
 	def run(self):
 		gen_max, caps_found = 0, dict()
+		count_pe = count_baks = 0
 
 		for cap in self.caps:
-			cap_key = 'root:' + cap
-			try: gen, name = json.loads(self.entry_cache[cap_key])
+			try: bak = self.entry_cache.backup_get(cap=cap)
 			except KeyError: continue
+			gen_max = max(bak['generation'], gen_max)
+			caps_found[cap] = bak
+
+		for gen in self.gens:
 			gen_max = max(gen, gen_max)
-			caps_found[cap_key] = gen, name, cap
+			backups = list()
+			if self.with_history:
+				backups.extend(self.entry_cache.backup_get_gen(gen, exact=False))
+			else:
+				try: backups.append(self.entry_cache.backup_get_gen(gen))
+				except KeyError: pass
+			for bak in backups: caps_found[bak['cap']] = bak
 
 		if gen_max:
-			cap_gen_chk = set(it.imap(op.itemgetter(0), caps_found.viewvalues()))
+			cap_gen_chk = set(it.imap(
+				op.itemgetter('generation'), caps_found.viewvalues() ))
+			cap_gen_chk.update(self.gens)
 			self.log.debug( 'Scanning entry_cache for generations'
 				' (max: {}): {}'.format(gen_max, ', '.join(it.imap(bytes, cap_gen_chk))) )
 
-			cleanup_keys = set()
-			def key_cleanup():
-				for k in cleanup_keys: del self.entry_cache[k]
-				cleanup_keys.clear()
-
-			ec_iter = self.iter_entry_cache()
-			while True:
-				try: k = next(ec_iter)
-				except StopIteration: break
-
-				if k == 'generation': pass
-				elif k.startswith('root:'):
-					gen = json.loads(self.entry_cache[k])
-					if self.with_history and gen < gen_max and gen not in cap_gen_chk:
-						cleanup_keys.add(k)
-				else:
-					gen, cap = json.loads(self.entry_cache[k])
-					if gen >= gen_max:
-						if self.with_history or gen in cap_gen_chk: cleanup_keys.add(k)
-
-				if self.delete_batch and len(cleanup_keys) > self.delete_batch:
-					key_cleanup()
-					ec_iter = self.iter_entry_cache() # restart iteration
-
-			key_cleanup()
+			if self.with_history:
+				for gen in cap_gen_chk:
+					count_pe += self.entry_cache.delete_generations(gen)
+			else:
+				count_pe += self.entry_cache.delete_generations(gen_max, exact=False)
 
 		if caps_found:
 			self.log.debug('Removing root caps from entry_cache')
-			for cap_key, (gen, name, cap) in caps_found.viewitems():
-				if self.delete_from_lafs_dir: yield self.delete_from_lafs_dir(name)
+			for cap_key, bak in caps_found.viewitems():
+				if self.delete_from_lafs_dir: yield self.delete_from_lafs_dir(bak['name'])
 				if self.delete_from_file:
 					with open(self.delete_from_file, 'a+') as dst:
 						fcntl.lockf(dst, fcntl.LOCK_EX)
-						data = ''.join(line for line in dst if line.split()[-1] != cap)
+						data = ''.join(line for line in dst if line.split()[-1] != bak['cap'])
 						dst.seek(0)
 						dst.truncate()
 						dst.write(data)
-				del self.entry_cache[cap_key]
+				self.entry_cache.backup_del(bak['cap'])
+				count_baks += 1
 
-		if gen_max or caps_found:
-			try: self.entry_cache.sync()
-			except AttributeError: pass
-			try: self.entry_cache.reorganize() # gdbm
-			except AttributeError: pass
+		self.log.debug(( 'Removed: {} path entries,'
+			' {} backup entries' ).format(count_pe, count_baks))
+
+
+
+class LAFSList(LAFSOperation):
+
+	def __init__(self, conf, list_dangling_gens=None):
+		super(LAFSList, self).__init__(conf)
+		self.list_dangling_gens = list_dangling_gens
+
+	def run(self):
+		gen_max = self.entry_cache.get_new_generation()
+
+		gens = set()
+		for i, bak in enumerate( self.entry_cache\
+				.backup_get_gen(gen_max, exact=False) ):
+			if i: print()
+			print(( 'Backup: {0[name]}\n  cap: {0[cap]}\n'
+				'  generation: {0[generation]}' ).format(bak))
+			gens.add(bak['generation'])
+
+		if self.list_dangling_gens is not None:
+			if self.list_dangling_gens: gen_max = None
+			objects = it.groupby(
+				sorted(
+					self.entry_cache.get_generations( gen_max,
+						include=self.list_dangling_gens, exclude=gens ),
+					key=op.itemgetter('generation') ),
+				key=op.itemgetter('generation') )
+			if objects:
+				i = 0
+				for gen, objects in objects:
+					if i: print('\n')
+					print('Generation: {}'.format(gen))
+					for obj in objects:
+						i += 1
+						print('  {}. ts: {}, metadata: {!r}'.format(i, obj['ts'], obj['metadata_dump']))
+
 
 
 
@@ -554,7 +533,17 @@ def main(argv=None, config=None):
 			help='LAFS URI(s) of the backup(s) to remove.'
 				'If not specified (or "-" is used), will be read from stdin.')
 		cmd.add_argument('--up-to', action='store_true',
-			help='Make sure to remove all the previous known backups as well.')
+			help='Make sure to remove all the previous known backups / generations as well.')
+		cmd.add_argument('-g', '--generation',
+			action='append', type=int, default=list(),
+			help='Also remove specified backup generations. Affected by --up-to option.')
+
+	with subcommand('list', help='List known finished backups.') as cmd:
+		cmd.add_argument('-g', '--generations',
+			action='append', type=int, nargs='*',
+			help='Also list dangling entries with generation numbers not linked'
+				' to any finished backup. More specific generation numbers can be'
+				' specified as an arguments to only list these.')
 
 	with subcommand('dump_config',
 		help='Dump configuration to stdout and exit.') as cmd: pass
@@ -605,7 +594,12 @@ def main(argv=None, config=None):
 		caps = set(optz.root_cap).difference({'-'})
 		if not optz.root_cap or '-' in optz.root_cap:
 			caps.update(it.ifilter(None, (line.strip() for line in sys.stdin)))
-		op = LAFSCleanup(cfg, caps, optz.up_to).run
+		op = LAFSCleanup(cfg, caps, optz.generation, optz.up_to).run
+
+	elif optz.call == 'list':
+		if optz.generations is not None:
+			optz.generations = set(it.chain.from_iterable(optz.generations))
+		op = LAFSList(cfg, list_dangling_gens=optz.generations).run
 
 	elif optz.call == 'dump_config': op = ft.partial(cfg.dump, sys.stdout)
 

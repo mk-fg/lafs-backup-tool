@@ -17,7 +17,6 @@ source:
   entry_cache:
     # Path to persistent db of remote directory nodes, required
     path: # example: /srv/backups/dentries.db
-    delete_batch: 10_000 # buffer key deletes, 0 or false for no limit
 
   # How to pick a path among those matched by "path" glob
   pick_policy: alphasort_last # only one supported
@@ -106,6 +105,8 @@ operation:
 logging: # see http://docs.python.org/library/logging.config.html
   # "custom" level means WARNING/DEBUG/NOISE, depending on CLI options
   warnings: true # capture python warnings
+  sql_queries: false # log executed sqlite queries (very noisy, caps will be there)
+
   version: 1
   formatters:
     basic:
