@@ -111,7 +111,7 @@ def token_bucket(metric, spec):
 		ts = time()
 		ts_sync, tokens = ts, min(burst, tokens + (ts - ts_sync) * rate)
 		val, tokens = (None, tokens - val)\
-			if tokens >= val else ((val - tokens) / rate, tokens)
+			if tokens >= val else ((val - tokens) / rate, tokens - val)
 		val = yield val
 
 
