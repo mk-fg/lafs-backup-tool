@@ -16,6 +16,7 @@ from twisted.web.client import Agent, RedirectAgent,\
 	GzipDecoder, FileBodyProducer
 from twisted.web.http_headers import Headers
 from twisted.web import http
+from twisted.protocols.basic import LineReceiver
 from twisted.internet import defer, reactor, ssl, task, protocol
 
 import logging
@@ -34,6 +35,21 @@ class DataReceiver(protocol.Protocol):
 	def connectionLost(self, reason):
 		# reason.getErrorMessage()
 		self.done.callback(b''.join(self.data))
+
+
+class LineQueue(LineReceiver):
+
+	delimiter = b'\n'
+	MAX_LENGTH = 2**20
+
+	def __init__(self, done, queue):
+		self.done, self.queue = done, queue
+
+	def lineReceived(self, line):
+		self.queue.put(line.strip())
+
+	def connectionLost(self, reason):
+		self.done.callback(None)
 
 
 
@@ -227,7 +243,8 @@ class HTTPClient(object):
 
 	@defer.inlineCallbacks
 	def request( self, url, method='get', decode=None,
-			encode=None, data=None, chunks=True, headers=dict(), raise_for=dict() ):
+			encode=None, data=None, chunks=True, headers=dict(),
+			raise_for=dict(), queue_lines=None ):
 		'''Make HTTP(S) request.
 			decode (response body) = None | json
 			encode (data) = None | json | form | files'''
@@ -273,7 +290,9 @@ class HTTPClient(object):
 			if code not in [http.OK, http.CREATED]: raise HTTPClientError(code, res.phrase)
 
 			data = defer.Deferred()
-			res.deliverBody(DataReceiver(data))
+			if queue_lines is None: res.deliverBody(DataReceiver(data))
+			else: res.deliverBody(LineQueue(data, queue_lines))
+
 			data = yield data
 			assert decode in ['json', None], decode
 			defer.returnValue(json.loads(data) if decode is not None else data)

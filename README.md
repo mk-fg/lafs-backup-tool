@@ -82,6 +82,7 @@ which case no such cleanup is necessary).
 
 `lafs-backup-tool list` command can be used to list finished backups, recorded
 in "entry_cache" db file along with their URIs.
+`lafs-backup-tool check` can run deep-check (and renew leases) on these.
 
 CLI reference can be produced by running `lafs-backup-tool --help`.
 For command-specific options, command in question must be specified,

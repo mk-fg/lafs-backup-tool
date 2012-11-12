@@ -53,15 +53,19 @@ class EntryCacheDB(object):
 			var TEXT PRIMARY KEY ON CONFLICT REPLACE NOT NULL,
 			val TEXT NOT NULL
 		);
-		INSERT INTO meta (var, val) VALUES ('schema_version', '1');
 	'''
 
+	_db_migrations = [
+		'''ALTER TABLE backups ADD COLUMN ts_check REAL NULL;
+			CREATE INDEX backups_ts_check ON backups (ts_check);''' ]
+
 	_db = None
+
 
 	def __init__(self, path, log=None):
 		self._log, self._db = log, sqlite3.connect(path)
 		self._db.row_factory = sqlite3.Row
-		with self._db as db: db.executescript(self._db_init)
+		self._init_db()
 
 	def __del__(self):
 		if self._db: self._db.close()
@@ -75,7 +79,17 @@ class EntryCacheDB(object):
 				yield c
 
 	def _query(self, *query_argz, **query_kwz):
-		with self._query(*query_argz, **query_kwz): pass
+		with self._cursor(*query_argz, **query_kwz): pass
+
+	def _init_db(self):
+		with self._db as db: db.executescript(self._db_init)
+		with self._cursor("SELECT val FROM meta WHERE var = 'schema_version' LIMIT 1") as c:
+			row = c.fetchone()
+			schema_ver = int(row['val']) if row else 1
+		for schema_ver, query in enumerate(
+			self._db_migrations[schema_ver-1:], schema_ver ): db.executescript(query)
+		self._query( 'INSERT INTO meta (var, val)'
+			" VALUES ('schema_version', '{}')".format(schema_ver + 1) )
 
 
 	def get_new_generation(self):
@@ -139,6 +153,20 @@ class EntryCacheDB(object):
 				if not ret: raise KeyError(gen)
 			else: ret = c.fetchall()
 			return ret
+
+	def backup_get_least_recently_checked(self, caps=None):
+		caps_filter, params = '', list()
+		if caps:
+			caps_filter = 'WHERE cap IN ({})'.format(', '.join(['?']*len(caps)))
+			params.extend(caps)
+		with self._cursor( 'SELECT * FROM backups'
+				' {} ORDER BY ts_check LIMIT 1'.format(caps_filter) ) as c:
+			row = c.fetchone()
+			if not row: raise KeyError(fields)
+			return row['cap']
+
+	def backup_checked(self, cap):
+		self._query('UPDATE backups SET ts_check = ? WHERE cap = ? LIMIT 1', (time(), cap))
 
 	def backup_del(self, cap):
 		self._query('DELETE FROM backups WHERE cap = ? LIMIT 1', (cap,))

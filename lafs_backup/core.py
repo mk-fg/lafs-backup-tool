@@ -11,7 +11,8 @@ from tempfile import NamedTemporaryFile
 from subprocess import Popen, PIPE
 from contextlib import contextmanager
 from time import time
-import os, sys, io, fcntl, stat, re, types, logging
+from hashlib import sha256
+import os, sys, io, fcntl, stat, re, types, json, logging
 
 from twisted.internet import reactor, defer
 import lya
@@ -515,6 +516,60 @@ class LAFSList(LAFSOperation):
 
 
 
+class LAFSCheck(LAFSOperation):
+
+	def __init__(self, conf, caps=None, fmt_ok=None, fmt_err='{}', pick=True, lease=True):
+		super(LAFSCheck, self).__init__(conf)
+		if pick: caps = [self.entry_cache.backup_get_least_recently_checked(caps)]
+		self.caps, self.lease, self.fmt_ok, self.fmt_err = caps, lease, fmt_ok, fmt_err
+		self.client = http.HTTPClient(**conf.http)
+
+	@staticmethod
+	@defer.inlineCallbacks
+	def first_result(*deferreds):
+		try:
+			res, idx = yield defer.DeferredList(
+				deferreds, fireOnOneCallback=True, fireOnOneErrback=True )
+		except defer.FirstError as err: err.subFailure.raiseException()
+		defer.returnValue(res)
+
+	@defer.inlineCallbacks
+	def run(self):
+		class NotFoundError(Exception): pass
+		for cap in self.caps:
+			try: bak = self.entry_cache.backup_get(cap=cap)
+			except KeyError: continue
+			self.log.debug('Checking backup: {}'.format(bak['name']))
+
+			lines = defer.DeferredQueue()
+			finished = self.client.request(
+				'{}/{}?t=stream-deep-check{}'.format(
+					self.conf.destination.url.rstrip('/'), cap, '&add-lease=true' if self.lease else '' ),
+				'post', raise_for={404: NotFoundError, 410: NotFoundError}, queue_lines=lines )
+
+			while True:
+				try: line = yield self.first_result(lines.get(), finished)
+				except NotFoundError:
+					self.log.warn( 'LAFS-URI (sha256 of it:'
+						' {}) was not found'.format(sha256(cap).hexdigest()) )
+					break
+				if line is None: break
+
+				unit = json.loads(line)
+				if unit['type'] in ['file', 'directory']:
+					if not unit['check-results']['results']['healthy']:
+						print(self.fmt_err.format(unit))
+					elif self.fmt_ok:
+						print(self.fmt_ok.format(unit))
+				elif unit['type'] == 'stats':
+					self.log.info('Check stats: {}'.format(unit))
+				else:
+					self.log.warn( 'Unrecognized response'
+						' unit type: {} (unit: {!r})'.format(unit['type'], line) )
+
+			self.entry_cache.backup_checked(cap)
+
+
 
 def main(argv=None, config=None):
 	import argparse
@@ -579,6 +634,32 @@ def main(argv=None, config=None):
 			help='Also list dangling entries in cache with generation numbers'
 				' not linked to any finished backup. More specific generation numbers'
 				' can be specified as an arguments to only list these.')
+
+	with subcommand('check',
+			help='Check health of a backup(s) and extend leases on its nodes.'
+				' If corruption is detected, only problematic paths are printed (by default).') as cmd:
+		cmd.add_argument('root_cap',
+			nargs='*', metavar='LAFS-URI', default=list(),
+			help='LAFS URI(s) of the backup(s) to check'
+				' (tahoe "stream-deep-check" operation is used).'
+				' If "-" is specified instead, will be read from stdin.')
+		cmd.add_argument('-a', '--least-recently-checked', action='store_true',
+			help='Pick and check just one least recently checked URI from'
+				' the ones specified (if any), or all known finished backups otherwise.')
+		cmd.add_argument('-n', '--no-lease', action='store_true',
+			help='Do not extend leases on the backup nodes (extended by default).')
+		cmd.add_argument('-f', '--format',
+			metavar='format_spec', default='{0[path]} ({0[type]})',
+			help='Python format string (passed to string.format function)'
+					' to use for logging lines about corrupted nodes.'
+				' "response unit" (as described in tahoe webapi.rst section on stream-deep-check)'
+					' is passed to format function as the only parameter.'
+				' Examples: "{0[path]} ({0[type]})" - default format, "{0}" - full dump of "response unit"'
+					' object (verbose), "path: {0[path]}, repaircap: {0[repaircap]},'
+					' good_hosts: {0[check-results][results][count-good-share-hosts]}".')
+		cmd.add_argument('--healthy-format', metavar='format_spec',
+			help='If specified, healthy paths will be printed'
+				' as well according to it (see --format for details).')
 
 	with subcommand('dump_config',
 		help='Dump configuration to stdout and exit.') as cmd: pass
@@ -650,18 +731,28 @@ def main(argv=None, config=None):
 			optz.generations = set(it.chain.from_iterable(optz.generations))
 		op = LAFSList(cfg, list_dangling_gens=optz.generations).run
 
+	elif optz.call == 'check':
+		caps = set(optz.root_cap).difference({'-'})
+		if '-' in optz.root_cap:
+			caps.update(it.ifilter(None, (line.strip() for line in sys.stdin)))
+		op = LAFSCheck( cfg, caps,
+				fmt_ok=optz.healthy_format, fmt_err=optz.format,
+				pick=optz.least_recently_checked, lease=not optz.no_lease ).run\
+			if caps or optz.least_recently_checked else None
+
 	elif optz.call == 'dump_config': op = ft.partial(cfg.dump, sys.stdout)
 
 	else: parser.error('Unrecognized command: {}'.format(optz.call))
 
 	## Actual work
-	def _stop(res):
-		if reactor.running: reactor.stop()
-		return res
-	reactor.callWhenRunning(
-		lambda: defer.maybeDeferred(op).addBoth(_stop) )
-	log.debug('Starting...')
-	reactor.run()
-	log.debug('Finished')
+	if op:
+		def _stop(res):
+			if reactor.running: reactor.stop()
+			return res
+		reactor.callWhenRunning(
+			lambda: defer.maybeDeferred(op).addBoth(_stop) )
+		log.debug('Starting...')
+		reactor.run()
+		log.debug('Finished')
 
 if __name__ == '__main__': main()
