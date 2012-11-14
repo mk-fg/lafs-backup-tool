@@ -567,6 +567,7 @@ class LAFSCheck(LAFSOperation):
 					self.log.warn( 'Unrecognized response'
 						' unit type: {} (unit: {!r})'.format(unit['type'], line) )
 
+			log.debug('Marking backup as checked: {}'.format(bak['name']))
 			self.entry_cache.backup_checked(cap)
 
 
