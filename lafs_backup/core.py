@@ -263,7 +263,7 @@ class LAFSBackup(LAFSOperation):
 		self.log.debug('Backup generation number: {}'.format(generation))
 
 		rate_limits = self.conf.operation.rate_limit
-		rate_limits_enabled = rate_limits.bytes or rate_limits.objects
+		rate_limits_enabled = bool(rate_limits.bytes or rate_limits.objects)
 
 		def rate_limit_check(metric, val=1):
 			tb = getattr(rate_limits, metric, None)
@@ -282,7 +282,7 @@ class LAFSBackup(LAFSOperation):
 				self.log.noise('Processing entry: {}'.format(line))
 
 				try:
-					path, obj = line.split(None, 1)
+					path, obj = line.rsplit(None, 1)
 				except ValueError: # root dir
 					path, obj = '', line
 					path_dir, name = '', backup_name
@@ -700,7 +700,7 @@ def main(argv=None, config=None):
 		if optz.queue_only is not False:
 			if optz.queue_only is not None:
 				cfg.source.queue.path = optz.queue_only
-			cfg.operation.queue_only = optz.queue_only
+			cfg.operation.queue_only = True
 		else:
 			# Check some paramaters, used in the upload phase
 			if cfg.destination.encoding.xz.enabled and not lzma:
@@ -717,7 +717,7 @@ def main(argv=None, config=None):
 					' and --reuse-queue cannot be used together.')
 			if optz.reuse_queue is not None:
 				cfg.source.queue.path = optz.reuse_queue
-			cfg.operation.reuse_queue = optz.reuse_queue
+			cfg.operation.reuse_queue = True
 
 		op = LAFSBackup(cfg).run
 
