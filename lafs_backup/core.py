@@ -436,6 +436,7 @@ class LAFSCleanup(LAFSOperation):
 			except KeyError: continue
 			gen_max = max(bak['generation'], gen_max)
 			caps_found[cap] = bak
+		self.gens.append(gen_max) # to make sure there's at least one
 
 		for gen in self.gens:
 			gen_max = max(gen, gen_max)
@@ -620,7 +621,7 @@ def main(argv=None, config=None):
 		cmd.add_argument('root_cap',
 			nargs='*', metavar='LAFS-URI', default=list(),
 			help='LAFS URI(s) of the backup(s) to remove.'
-				'If not specified (or "-" is used), will be read from stdin.')
+				' If not specified (or "-" is used), will be read from stdin.')
 		cmd.add_argument('--up-to', action='store_true',
 			help='Make sure to remove all the previous known backups / generations as well.')
 		cmd.add_argument('-g', '--generation',

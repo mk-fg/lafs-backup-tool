@@ -169,4 +169,4 @@ class EntryCacheDB(object):
 		self._query('UPDATE backups SET ts_check = ? WHERE cap = ?', (time(), cap))
 
 	def backup_del(self, cap):
-		self._query('DELETE FROM backups WHERE cap = ? LIMIT 1', (cap,))
+		self._query('DELETE FROM backups WHERE cap = ?', (cap,))
