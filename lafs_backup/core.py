@@ -519,10 +519,12 @@ class LAFSList(LAFSOperation):
 
 class LAFSCheck(LAFSOperation):
 
-	def __init__(self, conf, caps=None, fmt_ok=None, fmt_err='{}', pick=True, lease=True):
+	def __init__( self, conf, caps=None,
+			fmt_ok=None, fmt_err='{}', pick=True, lease=True, err_out=False ):
 		super(LAFSCheck, self).__init__(conf)
 		if pick: caps = [self.entry_cache.backup_get_least_recently_checked(caps)]
-		self.caps, self.lease, self.fmt_ok, self.fmt_err = caps, lease, fmt_ok, fmt_err
+		self.caps, self.lease = caps, lease
+		self.fmt_ok, self.fmt_err, self.err_out = fmt_ok, fmt_err, err_out
 		self.client = http.HTTPClient(**conf.http)
 
 	@staticmethod
@@ -537,6 +539,9 @@ class LAFSCheck(LAFSOperation):
 	@defer.inlineCallbacks
 	def run(self):
 		class NotFoundError(Exception): pass
+		p = print if not self.err_out else ft.partial(print, file=sys.stderr)
+		errors = False
+
 		for cap in self.caps:
 			try: bak = self.entry_cache.backup_get(cap=cap)
 			except KeyError: continue
@@ -556,22 +561,39 @@ class LAFSCheck(LAFSOperation):
 					break
 				if line is None: break
 
-				unit = json.loads(line)
+				try: unit = json.loads(line)
+				except ValueError as err:
+					if line.startswith('ERROR:'):
+						# Is usually followed by tahoe backtrace, which is skipped here
+						self.log.fatal('Error from node, aborting: {}'.format(line[6:].strip()))
+						errors = True
+						break
+					else:
+						self.log.error('Failed to decode as json: {!r}'.format(line))
+						raise
+
 				if unit['type'] in ['file', 'directory']:
 					if not unit['check-results']['results']['healthy']:
-						print(self.fmt_err.format(unit))
+						p(self.fmt_err.format(unit))
+						errors = True
 					elif self.fmt_ok:
-						print(self.fmt_ok.format(unit))
+						p(self.fmt_ok.format(unit))
 				elif unit['type'] == 'stats':
 					self.log.info('Check stats: {}'.format(unit))
 				else:
 					self.log.warn( 'Unrecognized response'
 						' unit type: {} (unit: {!r})'.format(unit['type'], line) )
 
-			log.debug('Marking backup as checked: {}'.format(bak['name']))
+			self.log.debug('Marking backup as checked: {}'.format(bak['name']))
 			self.entry_cache.backup_checked(cap)
 
+		if self.err_out and errors:
+			global exit_code
+			exit_code = 1
 
+
+
+exit_code = 0 # should only be set if op is requested to fail
 
 def main(argv=None, config=None):
 	import argparse
@@ -662,6 +684,10 @@ def main(argv=None, config=None):
 		cmd.add_argument('--healthy-format', metavar='format_spec',
 			help='If specified, healthy paths will be printed'
 				' as well according to it (see --format for details).')
+		cmd.add_argument('-e', '--error-output', action='store_true',
+			help='Send output to stderr instead of stdout,'
+					' exit with error status if any corrupted nodes were detected.'
+				' Can be useful if script runs from crontab or something similar.')
 
 	with subcommand('dump_config',
 		help='Dump configuration to stdout and exit.') as cmd: pass
@@ -739,7 +765,8 @@ def main(argv=None, config=None):
 			caps.update(it.ifilter(None, (line.strip() for line in sys.stdin)))
 		op = LAFSCheck( cfg, caps,
 				fmt_ok=optz.healthy_format, fmt_err=optz.format,
-				pick=optz.least_recently_checked, lease=not optz.no_lease ).run\
+				pick=optz.least_recently_checked, lease=not optz.no_lease,
+				err_out=optz.error_output ).run\
 			if caps or optz.least_recently_checked else None
 
 	elif optz.call == 'dump_config': op = ft.partial(cfg.dump, sys.stdout)
@@ -757,4 +784,8 @@ def main(argv=None, config=None):
 		reactor.run()
 		log.debug('Finished')
 
-if __name__ == '__main__': main()
+	return exit_code
+
+
+if __name__ == '__main__':
+	sys.exit(main())
