@@ -12,7 +12,7 @@ from subprocess import Popen, PIPE
 from contextlib import contextmanager
 from time import time
 from hashlib import sha256
-import os, sys, io, fcntl, stat, re, types, json, logging
+import os, sys, io, fcntl, stat, re, types, json, logging, traceback
 
 from twisted.internet import reactor, defer
 import lya
@@ -43,6 +43,11 @@ def check_filters(path, filters, default=True, log=None):
 			# if log: log.noise('Path matched filter ({}, {}): {!r}'.format(x, pat.pattern, path))
 			return x
 	return default
+
+def force_bytes(bytes_or_unicode, encoding='utf-8', errors='backslashreplace'):
+	'Convert passed string type to bytes, if necessary.'
+	if isinstance(bytes_or_unicode, bytes): return bytes_or_unicode
+	return bytes_or_unicode.encode(encoding, errors)
 
 
 class FileEncoder(io.FileIO):
@@ -121,6 +126,7 @@ class LAFSOperation(object):
 
 	conf_required = None
 	conf_required_init = 'source.entry_cache.path',
+	failure = None # used to indicate that some error was logged
 
 	def __init__(self, conf):
 		self.conf = conf
@@ -135,6 +141,24 @@ class LAFSOperation(object):
 		sql_log = logging.getLogger('lafs_backup.EntryCacheDB')\
 			if conf.logging.sql_queries else None
 		self.entry_cache = db.EntryCacheDB(conf.source.entry_cache.path, log=sql_log)
+
+	@staticmethod
+	def log_uid():
+		'''Returns tag to that should be matching for 2+ lines of log, so that it'd be
+				reasonably guaranteed that they came from the same place in code and same run.
+			It's formatted like "[c315.2e38]", where "c" is a static uuid-schema tag,
+				"315" is the line in code (from where it was called) and 2e38 is derived
+				from source filename and urandom.'''
+		src, line = traceback.extract_stack()[-2][:2]
+		return '[c{0}.{1}]'.format(line, sha256( b'{0}\0{1}\0{2}'\
+			.format(force_bytes(src), line, os.urandom(3)) ).hexdigest()[:4])
+
+	def log_failure(self, err):
+		'Log failure and set the self.failure flag.'
+		self.failure, lid = True, self.log_uid()
+		self.log.error('{} {}'.format(lid, err.getErrorMessage()))
+		for line in err.getTraceback().splitlines():
+			self.log.error('{}   {}'.format(lid, line))
 
 
 
@@ -552,6 +576,7 @@ class LAFSCheck(LAFSOperation):
 				'{}/{}?t=stream-deep-check{}'.format(
 					self.conf.destination.url.rstrip('/'), cap, '&add-lease=true' if self.lease else '' ),
 				'post', raise_for={404: NotFoundError, 410: NotFoundError}, queue_lines=lines )
+			finished.addErrback(self.log_failure)
 
 			while True:
 				try: line = yield self.first_result(lines.get(), finished)
@@ -584,8 +609,10 @@ class LAFSCheck(LAFSOperation):
 					self.log.warn( 'Unrecognized response'
 						' unit type: {} (unit: {!r})'.format(unit['type'], line) )
 
-			self.log.debug('Marking backup as checked: {}'.format(bak['name']))
-			self.entry_cache.backup_checked(cap)
+			if not self.failure:
+				self.log.debug('Marking backup as checked: {}'.format(bak['name']))
+				self.entry_cache.backup_checked(cap)
+			else: errors = True
 
 		if self.err_out and errors:
 			global exit_code

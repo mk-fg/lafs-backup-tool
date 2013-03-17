@@ -13,7 +13,7 @@ from lya import AttrDict
 from twisted.web.iweb import IBodyProducer, UNKNOWN_LENGTH
 from twisted.web.client import Agent, RedirectAgent,\
 	HTTPConnectionPool, HTTP11ClientProtocol, ContentDecoderAgent,\
-	GzipDecoder, FileBodyProducer
+	GzipDecoder, FileBodyProducer, ResponseDone
 from twisted.web.http_headers import Headers
 from twisted.web import http
 from twisted.protocols.basic import LineReceiver
@@ -33,8 +33,7 @@ class DataReceiver(protocol.Protocol):
 		self.data.append(chunk)
 
 	def connectionLost(self, reason):
-		# reason.getErrorMessage()
-		self.done.callback(b''.join(self.data))
+		self.done.callback(b''.join(self.data) if isinstance(reason.value, ResponseDone) else reason)
 
 
 class LineQueue(LineReceiver):
@@ -49,7 +48,7 @@ class LineQueue(LineReceiver):
 		self.queue.put(line.strip())
 
 	def connectionLost(self, reason):
-		self.done.callback(None)
+		self.done.callback(None if isinstance(reason.value, ResponseDone) else reason)
 
 
 
