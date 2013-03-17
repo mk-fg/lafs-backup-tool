@@ -544,10 +544,11 @@ class LAFSList(LAFSOperation):
 class LAFSCheck(LAFSOperation):
 
 	def __init__( self, conf, caps=None,
-			fmt_ok=None, fmt_err='{}', pick=True, lease=True, err_out=False ):
+			fmt_ok=None, fmt_err='{}', pick=True,
+			lease=True, repair=False, err_out=False ):
 		super(LAFSCheck, self).__init__(conf)
 		if pick: caps = [self.entry_cache.backup_get_least_recently_checked(caps)]
-		self.caps, self.lease = caps, lease
+		self.caps, self.lease, self.repair = caps, lease, repair
 		self.fmt_ok, self.fmt_err, self.err_out = fmt_ok, fmt_err, err_out
 		self.client = http.HTTPClient(**conf.http)
 
@@ -572,9 +573,12 @@ class LAFSCheck(LAFSOperation):
 			self.log.debug('Checking backup: {}'.format(bak['name']))
 
 			lines = defer.DeferredQueue()
+			url_extras = ''
+			if self.lease: url_extras += '&add-lease=true'
+			if self.repair: url_extras += '&repair=true'
 			finished = self.client.request(
 				'{}/{}?t=stream-deep-check{}'.format(
-					self.conf.destination.url.rstrip('/'), cap, '&add-lease=true' if self.lease else '' ),
+					self.conf.destination.url.rstrip('/'), cap, url_extras ),
 				'post', raise_for={404: NotFoundError, 410: NotFoundError}, queue_lines=lines )
 			finished.addErrback(self.log_failure)
 
@@ -598,7 +602,9 @@ class LAFSCheck(LAFSOperation):
 						raise
 
 				if unit['type'] in ['file', 'directory']:
-					if not unit['check-results']['results']['healthy']:
+					res = unit['check-results'] if not self.repair\
+						else unit['check-and-repair-results']['post-repair-results']
+					if not res['results']['healthy']:
 						p(self.fmt_err.format(unit))
 						errors = True
 					elif self.fmt_ok:
@@ -697,6 +703,8 @@ def main(argv=None, config=None):
 		cmd.add_argument('-a', '--least-recently-checked', action='store_true',
 			help='Pick and check just one least recently checked URI from'
 				' the ones specified (if any), or all known finished backups otherwise.')
+		cmd.add_argument('-r', '--repair', action='store_true',
+			help='Perform "repair" operation as well, if necessary, reporting only repair failures.')
 		cmd.add_argument('-n', '--no-lease', action='store_true',
 			help='Do not extend leases on the backup nodes (extended by default).')
 		cmd.add_argument('-f', '--format',
@@ -793,7 +801,7 @@ def main(argv=None, config=None):
 		op = LAFSCheck( cfg, caps,
 				fmt_ok=optz.healthy_format, fmt_err=optz.format,
 				pick=optz.least_recently_checked, lease=not optz.no_lease,
-				err_out=optz.error_output ).run\
+				repair=optz.repair, err_out=optz.error_output ).run\
 			if caps or optz.least_recently_checked else None
 
 	elif optz.call == 'dump_config': op = ft.partial(cfg.dump, sys.stdout)
