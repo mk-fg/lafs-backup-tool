@@ -399,8 +399,10 @@ class LAFSBackup(LAFSOperation):
 				tmp.write('{} {}\n'.format(path, self.meta_dump(meta)))
 			tmp.flush()
 			with open(dst, 'w') as queue:
-				if Popen(['tac', tmp.name], stdout=queue).wait():
-					raise RuntimeError('Failed to run "tac" binary (coreutils).')
+				sort = Popen(['sort', tmp.name], stdout=PIPE)
+				tac = Popen(['tac'], stdin=sort.stdout, stdout=queue)
+				if sort.wait() or tac.wait():
+					raise RuntimeError('Failed to run "sort | tac" binaries (coreutils).')
 
 	def queue_generator(self, path):
 
