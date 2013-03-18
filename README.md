@@ -65,10 +65,10 @@ Resulting config file might look something like this:
 	    path: /srv/backups/tmp/dentries.db
 
 	filter:
-	  - [+, '^/var/log/($|security/)'] # backup only that subdir from /var/log
-	  - '^/var/(tmp|cache|log|spool)/'
-	  - '^/home/\w+/Downloads/'
-	  - '^/tmp/'
+	  - '+^/var/log/($|security/)' # backup only that subdir from /var/log
+	  - '-^/var/(tmp|cache|log|spool)/'
+	  - '-^/home/\w+/Downloads/'
+	  - '-^/tmp/'
 
 After that, backup process can be started with `lafs-backup-tool -c
 <path_to_local_config> backup`.
@@ -152,7 +152,9 @@ Some additional ideas that came after the initial implementation:
 Implementation details
 --------------------
 
-Only immutable lafs files/dirnodes are used at the moment.
+Only immutable lafs files/dirnodes are used at the moment, with the exception of
+"append_to_lafs_dir" option, which updates list of backup caps in a mutable lafs
+directory node.
 
 
 ##### Two-phase operation (of "backup" command)
@@ -163,16 +165,17 @@ Only immutable lafs files/dirnodes are used at the moment.
 	Queue file is a human-readable line-oriented plaintext list with relative
 	paths and fs metadata, like this:
 
+		tmp/session_debug.log 1000:1000:100644
+		tmp/root.log 0:0:100600//u::rwx,u:fraggod:rwx,g::r-x,m::rwx,o::r-x
+		tmp 1000:1000:100755
 		bin/skype_notify.sh 1000:1000:100755
 		bin/fs_backup 1000:1000:2750/=;cap_dac_read_search+i
 		bin 1000:1000:100755
-		tmp/root.log 0:0:100600//u::rwx,u:fraggod:rwx,g::r-x,m::rwx,o::r-x
-		tmp/session_debug.log 1000:1000:100644
-		tmp 1000:1000:100755
 		.netrc 1000:1000:100600
 		 1000:1000:100755
 
 	Format of each line is "path uid:gid:[mode][/caps[/acls]]".
+	List is reverse-alpha-sorted.
 
 * Phase two: read queue-file line-by-line and upload each file (checking if it's
 	not uploaded already) or create a directory entry to/on the grid.
@@ -187,16 +190,17 @@ Only immutable lafs files/dirnodes are used at the moment.
 
 	Note that such "already uploaded" state caching assumes that files stay
 	healthy (i.e. available) in the grid. Appropriate check/repair tools should be
-	used to ensure that that's the case.
+	used to ensure that that's the case (see "check" action below).
 
 Phases can be run individually - queue-file can be generated with `--queue-only
-[path]` and then just read with `--reuse-queue [path]` (or corresponding
-configuration file options).
+[path]` and then just read (skipping (re-)generation) with `--reuse-queue
+[path]` (or corresponding configuration file options).
 
-Interrupted (due to any reason) second phase of backup process (actual upload to
+Interrupted (for any reason) second phase of backup process (actual upload to
 the grid) can be resumed by just restarting the operation.
 `--reuse-queue` option may be used to speed things up a little (i.e. skip
-building it again from the same files).
+building it again from the same files), but is generally unnecessary if
+`source.queue.check_mtime` option is enabled (default).
 
 
 ##### Path filter
@@ -204,9 +208,10 @@ building it again from the same files).
 Very similar to rsync filter lists, but don't have merge (include other
 filter-files) operations and is based on regexps, not glob patterns.
 
-Represented as a list of either tuples like "[action ('+' or '-'), regexp]" or
-just exclude-patterns (python regexps) to match relative (to source.path,
-starting with "/") paths to backup.
+Represented as a list of exclude/include string-patterns (python regexps) to
+match relative (to source.path, starting with "/") paths to backup, and must
+start with '+' or '-' (that character gets stripped from regexp), to include or
+exclude path, respectively.
 
 Patterns are matched against each path in order they're listed.
 
@@ -219,11 +224,14 @@ If path doesn't match any regexp on the list, it will be included.
 
 Example:
 
-	- ['+', '/\.git/config$']   # backup git repository config files
-	- '/\.git/'                 # *don't* backup any repository objects
-	- ['-', '/\.git/']          # exactly same thing as above (redundant)
-	- '/(?i)\.?svn(/|ignore)$'  # exclude (case-insensitive) svn (or .svn) dirs and ignore-lists
-	- '^/tmp/'                  # exclude /tmp path (but not "/subpath/tmp")
+	- '+/\.git/config$'          # backup git repository config files
+	- '+/\.git/info/'            # backup git repository "info" directory/contents
+	- '-/\.git/'                 # *don't* backup/crawl-over any repository objects
+	- '-/(?i)\.?svn(/|ignore)$'  # exclude (case-insensitive) svn (or .svn) dirs and ignore-lists
+	- '-^/tmp/'                  # exclude /tmp path (but not "/subpath/tmp")
+
+Note how ordering of these lines makes only some paths within ".git" directories
+included, excluding the rest.
 
 Also documented in [base
 config](https://github.com/mk-fg/lafs-backup-tool/blob/master/lafs_backup/core.yaml).
@@ -257,10 +265,27 @@ Single filenode edge with metadata (dumped as YAML):
 
 Metadata is stored in the same format as in the queue-file (described above).
 
-One addtion to the queue-file data here is the "enc" key, which in example above
-indicates that file contents are encoded using xz compression.
+One notable addtion to the queue-file data here is the "enc" key, which in
+example above indicates that file contents are encoded using xz compression.
 In case of compression (as with most other possible encodings), "size" field
 doesn't indicate real (decoded) file size.
+
+
+##### Compression
+
+Configurable via similar pattern-matching mechanism as include/exclude filters
+(`destination.encoding.xz.path_filter` list).
+
+Filters here can be tuples like `[500, '\.(txt|csv|log)$']` to compress files
+matching a pattern, but only if size is larger than the given value.
+Otherwise syntax is identical ('+' or '-', followed by python regexp) to
+`filter` config section (see above).
+
+One operational difference from `filter` is that file size is taken into account
+here, with small-enough files not being compressed, as it generally produces
+larger output (for file sizes lesser than a few kilobytes, in case of xz
+compression).
+See `destination.encoding.xz.min_size` parameter.
 
 
 ##### Backup result
@@ -345,9 +370,9 @@ expose paths and some metadata information.
 
 ##### Twisted-based http client
 
-I'm quite fond of [requests](http://docs.python-requests.org/en/latest/)
-module myself, but unfortunately it doesn't seem to provide streaming uploads
-of large files at the moment.
+I'm quite fond of [requests](http://docs.python-requests.org/en/latest/) module
+myself, but ~~unfortunately it doesn't seem to provide streaming uploads of
+large files at the moment~~ needed functionality wasn't there before.
 
 Plus twisted is also a basis for tahoe-lafs implementation, so there's a good
 chance it's already available (unlike gevent, used in requests.async /
