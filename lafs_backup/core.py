@@ -170,17 +170,22 @@ class LAFSBackup(LAFSOperation):
 		super(LAFSBackup, self).__init__(conf)
 
 		_filter_actions = {'+': True, '-': False}
-		_compile_filters = lambda filters, c=lambda v: v: list(
-			( (False, re.compile(pat))
-				if is_str(pat) else (c(pat[0]), re.compile(pat[1])) )
-			for pat in (filters or list()) )
 
-		conf.filter = _compile_filters(conf.filter, lambda v, c=_filter_actions: c[v])
-		conf.destination.encoding.xz.path_filter = _compile_filters( # also allows size value
-			conf.destination.encoding.xz.path_filter, lambda v, c=_filter_actions: c.get(v, v) )
+		conf.filter = self._compile_filters(conf.filter, lambda v, c=_filter_actions: c[v])
+		conf.destination.encoding.xz.path_filter = self._compile_filters( # also allows size value
+			conf.destination.encoding.xz.path_filter,
+			lambda v, c=_filter_actions: c.get(v, v), force_str=False )
 
 		self.http = http.HTTPClient(**conf.http)
 		self.meta = meta.XMetaHandler()
+
+	def _compile_filters(self, filters, val=lambda v: v, force_str=True):
+		for pat in (filters or list()):
+			if force_str and (not is_str(pat) or not any(it.imap(pat.startswith, '-+'))):
+				raise ValueError(( 'As of 2013-03-18, filters must be specified as'
+					' strings with mandatory "+" or "-" prefix, please update your'
+					' configuration (offending filter spec: {}).' ).format(pat))
+			yield (val(pat[0]), re.compile(pat[1:] if is_str(pat) else pat[1]))
 
 
 	def pick_path(self):

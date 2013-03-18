@@ -41,17 +41,17 @@ destination:
       min_size: 5120 # don't compress files smaller than 5 KiB (unless overidden in "path_filter")
       path_filter:
         # List of include/exclude regexp path-rules, similar to "filter" section below.
-        # Same as with "filter", rules can be tuples with '+' or '-' (implied for strings) as first element.
-        #  '+' will indicate that file is compressible, if it's size >= "min_size" option.
-        #  Unlike "filter", first element of rule-tuple can also be a number,
-        #   overriding "min_size" parameter for matched (by that rule) paths.
+        # Same as with "filter", rules must start with '+' or '-', but here can also be tuples.
+        #  '+' will indicate that file is compressible, if it's size >= "min_size" option (see above).
+        # Unlike "filter", rule here can also be a tuple, with number as a first element,
+        #  overriding "min_size" parameter for matched (by that rule) paths.
         # If none of the patterns match path, file is handled as if it was matched by '+' rule.
 
-        # - '\.(gz|bz2|t[gb]z2?|xz|lzma|7z|zip|rar)$'
-        # - '\.(rpm|deb|iso)$'
-        # - '\.(jpe?g|gif|png|mov|avi|ogg|mkv|webm|mp[34g]|flv|flac|ape|pdf|djvu)$'
-        # - '\.(sqlite3?|fossil|fsl)$'
-        # - '\.git/objects/[0-9a-f]+/[0-9a-f]+$'
+        # - '-\.(gz|bz2|t[gb]z2?|xz|lzma|7z|zip|rar)$'
+        # - '-\.(rpm|deb|iso)$'
+        # - '-\.(jpe?g|gif|png|mov|avi|ogg|mkv|webm|mp[34g]|flv|flac|ape|pdf|djvu)$'
+        # - '-\.(sqlite3?|fossil|fsl)$'
+        # - '-\.git/objects/[0-9a-f]+/[0-9a-f]+$'
         # - [500, '\.(txt|csv|log|md|rst|cat|(ba|z|k|c|fi)?sh|env)$']
         # - [500, '\.(cgi|py|p[lm]|php|c|h|[ce]l|lisp|hs|patch|diff|xml|xsl|css|x?html[45]?|js)$']
         # - [500, '\.(co?nf|cfg?|li?st|ini|ya?ml|jso?n|vg|tab)(\.(sample|default|\w+-new))?$']
@@ -69,22 +69,22 @@ http:
 
 
 filter:
-  # Either tuples like "[action ('+' or '-'), regexp]" or just exclude-patterns (python
-  #  regexps) to match relative (to source.path, starting with "/") paths to backup.
+  # Exclude/include string-patterns (python regexps)
+  #  to match relative (to source.path, starting with "/") paths to backup.
+  # Must start with '+' or '-', to include or exclude path, respectively.
   # Patterns are matched against each path in order they're listed here.
   # Leaf directories are matched with the trailing slash
   #  (as with rsync) to be distinguishable from files with the same name.
   # If path doesn't match any regexp on the list, it will be included.
   #
   # Examples:
-  #  - ['+', '/\.git/config$']   # backup git repository config files
-  #  - '/\.git/'   # *don't* backup any repository objects
-  #  - ['-', '/\.git/']   # exactly same thing as above (redundant)
-  #  - '/(?i)\.?svn(/.*|ignore)$' # exclude (case-insensitive) svn (or .svn) paths and ignore-lists
+  #  - '+/\.git/config$'   # backup git repository config files
+  #  - '-/\.git/'   # *don't* backup any repository objects
+  #  - '-/(?i)\.?svn(/.*|ignore)$' # exclude (case-insensitive) svn (or .svn) paths and ignore-lists
 
-  # - '/(CVS|RCS|SCCS|_darcs|\{arch\})/$'
-  # - '/\.(git|hg|bzr|svn|cvs)(/|ignore|attributes|tags)?$'
-  # - '/=(RELEASE-ID|meta-update|update)$'
+  # - '-/(CVS|RCS|SCCS|_darcs|\{arch\})/$'
+  # - '-/\.(git|hg|bzr|svn|cvs)(/|ignore|attributes|tags)?$'
+  # - '-/=(RELEASE-ID|meta-update|update)$'
 
 
 operation:
