@@ -171,10 +171,10 @@ class LAFSBackup(LAFSOperation):
 
 		_filter_actions = {'+': True, '-': False}
 
-		conf.filter = self._compile_filters(conf.filter, lambda v, c=_filter_actions: c[v])
-		conf.destination.encoding.xz.path_filter = self._compile_filters( # also allows size value
+		conf.filter = list(self._compile_filters(conf.filter, lambda v, c=_filter_actions: c[v]))
+		conf.destination.encoding.xz.path_filter = list(self._compile_filters(
 			conf.destination.encoding.xz.path_filter,
-			lambda v, c=_filter_actions: c.get(v, v), force_str=False )
+			lambda v, c=_filter_actions: c.get(v, v), force_str=False ))
 
 		self.http = http.HTTPClient(**conf.http)
 		self.meta = meta.XMetaHandler()
