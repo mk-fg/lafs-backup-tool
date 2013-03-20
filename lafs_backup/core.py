@@ -143,6 +143,15 @@ class LAFSOperation(object):
 		self.entry_cache = db.EntryCacheDB(conf.source.entry_cache.path, log=sql_log)
 
 	@staticmethod
+	@defer.inlineCallbacks
+	def first_result(*deferreds):
+		try:
+			res, idx = yield defer.DeferredList(
+				deferreds, fireOnOneCallback=True, fireOnOneErrback=True )
+		except defer.FirstError as err: err.subFailure.raiseException()
+		defer.returnValue(res)
+
+	@staticmethod
 	def log_uid():
 		'''Returns tag to that should be matching for 2+ lines of log, so that it'd be
 				reasonably guaranteed that they came from the same place in code and same run.
@@ -277,7 +286,7 @@ class LAFSBackup(LAFSOperation):
 					fcntl.lockf(dst, fcntl.LOCK_EX)
 					dst.write('{} {} {}\n'.format(datetime.now().isoformat(), path, root_cap))
 			if self.conf.destination.result.append_to_lafs_dir:
-				yield self.http.request(
+				yield self.http.request_with_retries(
 					'{}/{}/{}?t=uri'.format( self.conf.destination.url.rstrip('/'),
 						self.conf.destination.result.append_to_lafs_dir.strip('/'),
 						basename(path) ), 'put', data=root_cap )
@@ -378,7 +387,7 @@ class LAFSBackup(LAFSOperation):
 		defer.returnValue(root['cap'])
 
 	def update_file(self, data):
-		return self.http.request(self.conf.destination.url, 'put', data=data)
+		return self.http.request_with_retries(self.conf.destination.url, 'put', data=data)
 
 	def update_dir(self, nodes):
 		contents = dict()
@@ -388,7 +397,7 @@ class LAFSBackup(LAFSOperation):
 			contents[name] = (
 				'dirnode' if stat.S_ISDIR(int(node.get('mode', '0'), 8)) else 'filenode',
 				dict(ro_uri=cap, metadata=node) )
-		return self.http.request( self.conf.destination.url
+		return self.http.request_with_retries( self.conf.destination.url
 			+ '?t=mkdir-immutable', 'post', encode='json', data=contents )
 
 
@@ -448,12 +457,13 @@ class LAFSCleanup(LAFSOperation):
 			@defer.inlineCallbacks
 			def delete_from_lafs_dir(name):
 				try:
-					defer.returnValue((yield client.request(
+					defer.returnValue((yield self.client.request_with_retries(
 						'{}/{}/{}'.format( conf.destination.url.rstrip('/'),
 							conf.destination.result.append_to_lafs_dir.strip('/'), name ),
 						'delete', raise_for={404: NotFoundError, 410: NotFoundError} )))
 				except NotFoundError: pass
 			self.delete_from_lafs_dir = delete_from_lafs_dir
+
 		if conf.destination.result.append_to_file:
 			self.delete_from_file = conf.destination.result.append_to_file
 
@@ -559,15 +569,6 @@ class LAFSCheck(LAFSOperation):
 		self.fmt_ok, self.fmt_err, self.err_out = fmt_ok, fmt_err, err_out
 		self.client = http.HTTPClient(**conf.http)
 
-	@staticmethod
-	@defer.inlineCallbacks
-	def first_result(*deferreds):
-		try:
-			res, idx = yield defer.DeferredList(
-				deferreds, fireOnOneCallback=True, fireOnOneErrback=True )
-		except defer.FirstError as err: err.subFailure.raiseException()
-		defer.returnValue(res)
-
 	@defer.inlineCallbacks
 	def run(self):
 		class NotFoundError(Exception): pass
@@ -625,7 +626,7 @@ class LAFSCheck(LAFSOperation):
 			if not self.failure:
 				self.log.debug('Marking backup as checked: {}'.format(bak['name']))
 				self.entry_cache.backup_checked(cap)
-			else: errors = True
+			else: errors = True # shouldn't generally happen
 
 		if self.err_out and errors:
 			global exit_code
@@ -687,14 +688,14 @@ def main(argv=None, config=None):
 		cmd.add_argument('--up-to', action='store_true',
 			help='Make sure to remove all the previous known backups / generations as well.')
 		cmd.add_argument('-g', '--generation',
-			action='append', type=int, default=list(),
+			action='append', type=int, default=list(), metavar='gen_id',
 			help='Also remove specified backup generations. Affected by --up-to option.'
 				' If no URIs (or "-") will be specified as arguments, stdin stream wont be scanned'
 				' for them and only specified (with this option) backup generations will be removed.')
 
 	with subcommand('list', help='List known finished backups.') as cmd:
 		cmd.add_argument('-g', '--generations',
-			action='append', type=int, nargs='*',
+			action='append', type=int, nargs='*', metavar='gen_id',
 			help='Also list dangling entries in cache with generation numbers'
 				' not linked to any finished backup. More specific generation numbers'
 				' can be specified as an arguments to only list these.')

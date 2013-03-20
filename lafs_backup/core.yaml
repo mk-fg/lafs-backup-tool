@@ -60,12 +60,27 @@ destination:
 
 
 http:
+  ca_certs_files: /etc/ssl/certs/ca-certificates.crt # can be a list
+  debug_requests: false # insecure! logs will contain tahoe caps
+
   request_pool_options:
     maxPersistentPerHost: 10
     cachedConnectionTimeout: 600
     retryAutomatically: true
-  ca_certs_files: /etc/ssl/certs/ca-certificates.crt # can be a list
-  debug_requests: false # insecure! logs will contain tahoe caps
+
+  # Allows to define retries for unexpected webapi errors
+  # Can be useful if network connection tend to disappear for a while
+  # Not applicable to long single-request streaming operations like "check",
+  #  because these would have to be restarted on any error in that request anyway
+  retry:
+    # Number of attempts to try for tahoe webapi requests
+    # 1 means "fail at once if webapi returns any unexpected error"
+    attempts: 4
+    # Seconds to wait between attempts
+    # Can be either an float (e.g. 10), or a list like [10, 30, 60, 600],
+    #  for different delays between retries on consecutive failures;
+    #  last delay will be reused if list is sorter than attempts-1
+    delay: [10, 60, 600]
 
 
 filter:

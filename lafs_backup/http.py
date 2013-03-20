@@ -217,6 +217,9 @@ class HTTPClient(object):
 		cachedConnectionTimeout=600,
 		retryAutomatically=True )
 
+	#: Settings for a simple retry mechanism on http error codes
+	retry = None
+
 	#: Path string or list of strings
 	ca_certs_files = b'/etc/ssl/certs/ca-certificates.crt'
 
@@ -240,6 +243,41 @@ class HTTPClient(object):
 			setattr(pool, k, v)
 		self.request_agent = ContentDecoderAgent(RedirectAgent(Agent(
 			reactor, TLSContextFactory(self.ca_certs_files), pool=pool )), [('gzip', GzipDecoder)])
+
+
+	@defer.inlineCallbacks
+	def request_with_retries(self, url, method, **request_kwz):
+		'''Gets repeated if any of "raise_for" errors or HTTPClientError is raised.
+			When number of attempts runs out, raises last error.'''
+		assert 'url' not in request_kwz and 'method' not in request_kwz
+		request_kwz['url'], request_kwz['method'] = url, method
+
+		# Shortcut for simple cases
+		if not self.retry or self.retry.attempts <= 1:
+			defer.returnValue((yield self.request(**request_kwz)))
+
+		retry_on = [HTTPClientError]
+		for cls in request_kwz.get('raise_for', dict()).viewvalues():
+			assert issubclass(cls, Exception), cls
+			retry_on.append(cls)
+
+		if isinstance(self.retry.delay, (tuple, list)):
+			delays = list(self.retry.delay)
+			for i in xrange(self.retry.attempts - len(delays), 1):
+				delays.append(delays[-1])
+		else: delays = [float(self.retry.delay)] * (self.retry.attempts - 1)
+		delays = list(reversed(delays))
+
+		while True:
+			try: defer.returnValue((yield self.request(**request_kwz)))
+			except tuple(retry_on) as err:
+				if not delays: raise # no attempts left
+				delay, d = delays.pop(), defer.Deferred()
+				reactor.callLater(delay, d.callback, None)
+				if self.debug_requests:
+					log.debug( 'Introducing delay after failed'
+						' ({}: {}) request: {}s'.format(type(err), err, delay) )
+				yield d
 
 
 	@defer.inlineCallbacks
