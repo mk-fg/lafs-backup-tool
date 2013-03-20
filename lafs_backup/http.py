@@ -33,7 +33,8 @@ class DataReceiver(protocol.Protocol):
 		self.data.append(chunk)
 
 	def connectionLost(self, reason):
-		self.done.callback(b''.join(self.data) if isinstance(reason.value, ResponseDone) else reason)
+		self.done.callback(b''.join(self.data)\
+			if isinstance(reason.value, ResponseDone) else reason)
 
 
 class LineQueue(LineReceiver):
@@ -48,7 +49,8 @@ class LineQueue(LineReceiver):
 		self.queue.put(line.strip())
 
 	def connectionLost(self, reason):
-		self.done.callback(None if isinstance(reason.value, ResponseDone) else reason)
+		self.done.callback(
+			None if isinstance(reason.value, ResponseDone) else reason )
 
 
 
@@ -252,7 +254,7 @@ class HTTPClient(object):
 				.format(method, url[:100], headers, encode, decode, data) )
 		method, body = method.lower(), None
 		headers = dict() if not headers else headers.copy()
-		headers.setdefault('User-Agent', 'txSkyDrive')
+		headers.setdefault('User-Agent', 'lafs-backup-tool')
 
 		if data is not None:
 			if encode == 'files':
