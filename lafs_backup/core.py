@@ -132,6 +132,20 @@ def log_uid():
 	return '[c{0}.{1}]'.format(line, sha256( b'{0}\0{1}\0{2}'\
 		.format(force_bytes(src), line, os.urandom(3)) ).hexdigest()[:4])
 
+def log_web_failure(log, err, err_lid=''):
+	'Try to print meaningful info about wrapped twisted.web exceptions.'
+	if err_lid and not err_lid.endswith(' '): err_lid += ' '
+	try: err.value.reasons # multiple levels of fail
+	except AttributeError: pass
+	else: err = err.value
+	if hasattr(err, 'reasons'):
+		for err in err.reasons:
+			lid = log_uid()
+			if isinstance(err, Failure):
+				log.error('{}{} {}: {}'.format(err_lid, lid, err.type, err.getErrorMessage()))
+				for line in err.getTraceback().splitlines():
+					log.error('{}{}   {}'.format(err_lid, lid, line))
+			else: log.error('{}{} {}: {}'.format(err_lid, lid, type(err), err))
 
 
 class LAFSOperation(object):
@@ -171,6 +185,7 @@ class LAFSOperation(object):
 		self.log.error('{} {}'.format(lid, err.getErrorMessage()))
 		for line in err.getTraceback().splitlines():
 			self.log.error('{}   {}'.format(lid, line))
+		log_web_failure(self.log, err, lid)
 
 
 
@@ -674,8 +689,14 @@ class LAFSCheck(LAFSOperation):
 						raise
 
 				if unit['type'] in ['file', 'directory']:
-					res = unit['check-results'] if not self.repair\
-						else unit['check-and-repair-results']['post-repair-results']
+					self.log.noise('Processing node path: {}'.format(join(*(unit.get('path') or ['???']))))
+					try:
+						res = unit['check-results'] if not self.repair\
+							else unit['check-and-repair-results']['post-repair-results']
+					except KeyError as err:
+						self.log.error('Failed to process check/repair unit ({}): {}'.format(unit, err))
+						self.failure = True # should be handled properly
+						continue
 					if not res['results']['healthy']:
 						p(self.fmt_err.format(unit))
 						errors = True
@@ -906,15 +927,7 @@ def main(argv=None, config=None):
 			if isinstance(res, (Exception, Failure)):
 				global exit_code
 				exit_code = 1
-				if hasattr(res, 'reasons'):
-					# Try to print meaningful info about each wrapped exception
-					for err in res.reasons:
-						lid = log_uid()
-						if isinstance(err, Failure):
-							log.error('{} {}'.format(lid, err.getErrorMessage()))
-							for line in err.getTraceback().splitlines():
-								log.error('{}   {}'.format(lid, line))
-						else: log.error('{} {}: {}'.format(lid, type(err), err))
+				log_web_failure(log, res)
 			if reactor.running: reactor.stop()
 			return res # will still be raised/logged by twisted
 		reactor.callWhenRunning(
