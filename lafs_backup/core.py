@@ -335,7 +335,7 @@ class LAFSBackup(LAFSOperation):
 		with open(path_queue) as queue:
 			for line in queue:
 				line = line.strip()
-				self.log.noise('Processing entry: {}'.format(line))
+				self.log.noise('Processing entry: /{}'.format(line))
 
 				try:
 					path, obj = line.rsplit(None, 1)
@@ -373,7 +373,7 @@ class LAFSBackup(LAFSOperation):
 						sent['bytes'] += size
 						sent['objects'] += 1
 					else:
-						self.log.noise('Skipping path as duplicate: {}'.format(path))
+						self.log.noise('Skipping path as duplicate: /{}'.format(path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
 
 				else:
@@ -392,7 +392,7 @@ class LAFSBackup(LAFSOperation):
 							.format(ts, len(contents), path) )
 						sent['objects'] += 1
 					else:
-						self.log.noise('Skipping path as duplicate: {}'.format(path))
+						self.log.noise('Skipping path as duplicate: /{}'.format(path))
 					obj['cap'], nodes[path_dir][name] = cap, obj
 
 				# Check rate-limiting and introduce delay, if necessary
@@ -692,15 +692,19 @@ class LAFSCheck(LAFSOperation):
 					unit_path = unit.get('path')
 					if unit_path is None: unit_path = ['???']
 					elif not unit_path: unit_path = ['']
-					self.log.noise('Processing node path: {}'.format(join(*unit_path)))
+					self.log.noise('Processing node path: /{} ({})'.format(join(*unit_path), unit['type']))
 					try:
 						res = unit['check-results'] if not self.repair\
-							else unit['check-and-repair-results']['post-repair-results']
+							else (
+								unit['check-and-repair-results']['post-repair-results']
+								if unit['check-and-repair-results']['repair-attempted']
+								else True )
 					except KeyError as err:
-						self.log.error('Failed to process check/repair unit ({}): {}'.format(unit, err))
+						self.log.error( 'Failed to process'
+							' check/repair unit ({}): {} - {}'.format(unit, type(err), err) )
 						self.failure = True # should be handled properly
 						continue
-					if not res['results']['healthy']:
+					if res is not True and not res['results']['healthy']:
 						p(self.fmt_err.format(unit))
 						errors = True
 					elif self.fmt_ok:
