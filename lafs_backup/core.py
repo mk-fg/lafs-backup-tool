@@ -140,6 +140,8 @@ class LAFSOperation(object):
 	conf_required_init = 'source.entry_cache.path',
 	failure = None # used to indicate that some error was logged
 
+	class OperationalError(Exception): pass
+
 	def __init__(self, conf):
 		self.conf = conf
 		self.conf_required = list(self.conf_required or list())
@@ -447,14 +449,21 @@ class LAFSBackup(LAFSOperation):
 
 class LAFSCleanup(LAFSOperation):
 
-	def __init__(self, conf, caps, gens, with_history=False):
+	def __init__( self, conf, caps, gens,
+			with_history=False, enumerate_shares=False, enumerate_only=False ):
 		super(LAFSCleanup, self).__init__(conf)
 		self.caps, self.gens, self.with_history = caps, gens, with_history
+		self.enumerate_shares, self.enumerate_only = enumerate_shares, enumerate_only
 
 		self.delete_from_lafs_dir = self.delete_from_file = None
-		if conf.destination.result.append_to_lafs_dir:
-			client = http.HTTPClient(**conf.http)
+
+		if conf.destination.result.append_to_lafs_dir\
+				or self.enumerate_shares is not False:
 			class NotFoundError(Exception): pass
+
+			self.client = http.HTTPClient(**conf.http)
+			self.NotFoundError = NotFoundError
+
 			@defer.inlineCallbacks
 			def delete_from_lafs_dir(name):
 				try:
@@ -467,6 +476,56 @@ class LAFSCleanup(LAFSOperation):
 
 		if conf.destination.result.append_to_file:
 			self.delete_from_file = conf.destination.result.append_to_file
+
+	@contextmanager
+	def enumerate_output(self, dst_spec):
+		if dst_spec is None or dst_spec == '-': yield sys.stdout
+		else:
+			with open(dst_spec, 'w') as dst: yield dst
+
+	@defer.inlineCallbacks
+	def run_enumerate(self, baks):
+		# Operation is quite similar to what "check" does
+		with self.enumerate_output(self.enumerate_shares) as dst:
+			p = ft.partial(print, file=dst)
+			error_skip = False
+
+			for bak in baks:
+				self.log.debug('Enumerating shares for: {}'.format(bak['name']))
+
+				lines = defer.DeferredQueue()
+				finished = self.client.request(
+					'{}/{}?t=stream-manifest'.format(self.conf.destination.url.rstrip('/'), bak['cap']),
+					'post', raise_for={404: self.NotFoundError, 410: self.NotFoundError}, queue_lines=lines )
+				finished.addErrback(self.log_failure)
+
+				while True:
+					try: line = yield self.first_result(lines.get(), finished)
+					except self.NotFoundError:
+						self.log.warn( 'LAFS-URI (sha256 of it:'
+							' {}) was not found'.format(sha256(cap).hexdigest()) )
+						break
+					if line is None: break
+
+					try: unit = json.loads(line)
+					except ValueError as err:
+						if line.startswith('ERROR:'):
+							# Is usually followed by tahoe backtrace, which is skipped via "error_skip"
+							self.log.error('Error from node, skipping line: {}'.format(line[6:].strip()))
+							error_skip = True
+							continue
+						elif error_skip: continue # backtrace after error, a bit unreliable way to do it
+						else:
+							self.log.error('Failed to decode as json: {!r}'.format(line))
+							raise
+					else: error_skip = False
+
+					shareid = unit.get('storage-index')
+					if shareid: p(shareid)
+
+		if self.failure: # some error was logged, shouldn't generally happen
+			raise self.OperationalError('Some error was detected during share enumeration')
+
 
 	@defer.inlineCallbacks
 	def run(self):
@@ -497,13 +556,17 @@ class LAFSCleanup(LAFSOperation):
 			self.log.debug( 'Scanning entry_cache for generations'
 				' (max: {}): {}'.format(gen_max, ', '.join(it.imap(bytes, cap_gen_chk))) )
 
-			if self.with_history:
-				for gen in cap_gen_chk:
-					count_pe += self.entry_cache.delete_generations(gen)
-			else:
-				count_pe += self.entry_cache.delete_generations(gen_max, exact=False)
+			if self.enumerate_shares is not False: # None means "stdout"
+				yield self.run_enumerate(caps_found.viewvalues())
 
-		if caps_found:
+			if not self.enumerate_only:
+				if not self.with_history:
+					for gen in cap_gen_chk:
+						count_pe += self.entry_cache.delete_generations(gen)
+				else:
+					count_pe += self.entry_cache.delete_generations(gen_max, exact=False)
+
+		if not self.enumerate_only and caps_found:
 			self.log.debug('Removing root caps from entry_cache')
 			for cap_key, bak in caps_found.viewitems():
 				if self.delete_from_lafs_dir: yield self.delete_from_lafs_dir(bak['name'])
@@ -688,6 +751,19 @@ def main(argv=None, config=None):
 				' If not specified (or "-" is used), will be read from stdin.')
 		cmd.add_argument('--up-to', action='store_true',
 			help='Make sure to remove all the previous known backups / generations as well.')
+		cmd.add_argument('-e', '--enumerate-shares',
+			default=False, nargs='?', metavar='dst_file',
+			help='Do a "stream-manifest" operation with removed caps,'
+					' picking shareid of all the shares that are to be removed from the db.'
+				' Plain list of one-per-line share-ids (as returned by node)'
+					' will be written to a file specified as an argument'
+					' or stdout, if it is not specified or "-" is specified instead.'
+				' As each cleaned-up backup is crawled separately,'
+					' resulting list may contain duplicate shares (if backups share some files).')
+		cmd.add_argument('-n', '--enumerate-only', action='store_true',
+			help='Do not remove any info from cache/destinations,'
+					' just query and print the known-to-be-affected shares.'
+				' Only makes sense with --enumerate-shares option.')
 		cmd.add_argument('-g', '--generation',
 			action='append', type=int, default=list(), metavar='gen_id',
 			help='Also remove specified backup generations. Affected by --up-to option.'
@@ -796,7 +872,11 @@ def main(argv=None, config=None):
 		caps = set(optz.root_cap).difference({'-'})
 		if (not optz.generation and not optz.root_cap) or '-' in optz.root_cap:
 			caps.update(it.ifilter(None, (line.strip() for line in sys.stdin)))
-		op = LAFSCleanup(cfg, caps, optz.generation, optz.up_to).run
+		if optz.enumerate_only and optz.enumerate_shares is False:
+			parser.error('Option --enumerate-only can only be used with --enumerate-shares.')
+		op = LAFSCleanup( cfg, caps,
+			optz.generation, optz.up_to,
+			optz.enumerate_shares, optz.enumerate_only ).run
 
 	elif optz.call == 'list':
 		if optz.generations is not None:
