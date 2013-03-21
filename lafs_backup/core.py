@@ -15,6 +15,7 @@ from hashlib import sha256
 import os, sys, io, fcntl, stat, re, types, json, logging, traceback
 
 from twisted.internet import reactor, defer
+from twisted.python.failure import Failure
 import lya
 
 is_str = lambda obj,s=types.StringTypes: isinstance(obj, s)
@@ -121,6 +122,17 @@ def token_bucket(metric, spec):
 		val = yield val
 
 
+def log_uid():
+	'''Returns tag to that should be matching for 2+ lines of log, so that it'd be
+			reasonably guaranteed that they came from the same place in code and same run.
+		It's formatted like "[c315.2e38]", where "c" is a static uuid-schema tag,
+			"315" is the line in code (from where it was called) and 2e38 is derived
+			from source filename and urandom.'''
+	src, line = traceback.extract_stack()[-2][:2]
+	return '[c{0}.{1}]'.format(line, sha256( b'{0}\0{1}\0{2}'\
+		.format(force_bytes(src), line, os.urandom(3)) ).hexdigest()[:4])
+
+
 
 class LAFSOperation(object):
 
@@ -151,20 +163,9 @@ class LAFSOperation(object):
 		except defer.FirstError as err: err.subFailure.raiseException()
 		defer.returnValue(res)
 
-	@staticmethod
-	def log_uid():
-		'''Returns tag to that should be matching for 2+ lines of log, so that it'd be
-				reasonably guaranteed that they came from the same place in code and same run.
-			It's formatted like "[c315.2e38]", where "c" is a static uuid-schema tag,
-				"315" is the line in code (from where it was called) and 2e38 is derived
-				from source filename and urandom.'''
-		src, line = traceback.extract_stack()[-2][:2]
-		return '[c{0}.{1}]'.format(line, sha256( b'{0}\0{1}\0{2}'\
-			.format(force_bytes(src), line, os.urandom(3)) ).hexdigest()[:4])
-
 	def log_failure(self, err):
 		'Log failure and set the self.failure flag.'
-		self.failure, lid = True, self.log_uid()
+		self.failure, lid = True, log_uid()
 		self.log.error('{} {}'.format(lid, err.getErrorMessage()))
 		for line in err.getTraceback().splitlines():
 			self.log.error('{}   {}'.format(lid, line))
@@ -819,10 +820,23 @@ def main(argv=None, config=None):
 	## Actual work
 	if op:
 		def _stop(res):
+			if isinstance(res, (Exception, Failure)):
+				global exit_code
+				exit_code = 1
+				if hasattr(res, 'reasons'):
+					# Try to print meaningful info about each wrapped exception
+					for err in res.reasons:
+						lid = log_uid()
+						if isinstance(err, Failure):
+							log.error('{} {}'.format(lid, err.getErrorMessage()))
+							for line in err.getTraceback().splitlines():
+								log.error('{}   {}'.format(lid, line))
+						else: log.error('{} {}: {}'.format(lid, type(err), err))
 			if reactor.running: reactor.stop()
-			return res
+			return res # will still be raised/logged by twisted
 		reactor.callWhenRunning(
 			lambda: defer.maybeDeferred(op).addBoth(_stop) )
+
 		log.debug('Starting...')
 		reactor.run()
 		log.debug('Finished')
