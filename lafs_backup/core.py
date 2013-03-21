@@ -689,7 +689,10 @@ class LAFSCheck(LAFSOperation):
 						raise
 
 				if unit['type'] in ['file', 'directory']:
-					self.log.noise('Processing node path: {}'.format(join(*(unit.get('path') or ['???']))))
+					unit_path = unit.get('path')
+					if unit_path is None: unit_path = ['???']
+					elif not unit_path: unit_path = ['']
+					self.log.noise('Processing node path: {}'.format(join(*unit_path)))
 					try:
 						res = unit['check-results'] if not self.repair\
 							else unit['check-and-repair-results']['post-repair-results']
