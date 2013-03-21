@@ -759,7 +759,10 @@ def main(argv=None, config=None):
 					' will be written to a file specified as an argument'
 					' or stdout, if it is not specified or "-" is specified instead.'
 				' As each cleaned-up backup is crawled separately,'
-					' resulting list may contain duplicate shares (if backups share some files).')
+					' resulting list may contain duplicate shares (if backups share some files).'
+				' Note that just removing these may cause same-content'
+					' files from newer backups become unavailable as well'
+					' (unless convergence secret was updated for these).')
 		cmd.add_argument('-n', '--enumerate-only', action='store_true',
 			help='Do not remove any info from cache/destinations,'
 					' just query and print the known-to-be-affected shares.'

@@ -76,7 +76,7 @@ When all files will be backed-up, LAFS URI of the backup root will be, unless
 disabled in config, printed to stdout.
 
 If/when old backup files will be removed from LAFS, `lafs-backup-tool cleanup`
-command should be used to purge removed entries from deduplication cache
+command can be used to purge removed entries from deduplication cache
 ("entry_cache" settings), unless "disable_deduplication" option is used (in
 which case no such cleanup is necessary).
 
@@ -299,7 +299,7 @@ higher-level mutable directory (with a basename of a source path).
 
 Other than that, it also gets recorded to "entry_cache" db along with generation
 number for this particular backup, so that it can later be removed along with
-all the files unique to it through the cleanup procedure.
+all the cache entries unique to it through the cleanup procedure.
 
 See "destination.result" section of the [base
 config](https://github.com/mk-fg/lafs-backup-tool/blob/master/lafs_backup/core.yaml)
@@ -334,7 +334,7 @@ should be done:
 	in lafs dir was not renamed.
 
 	Naturally, if cap was linked to some other directory node manually, it won't
-	be removed by the command.
+	be removed by the command, same for the actual shares on tahoe nodes.
 
 * "entry_cache" db removed or encrypted in a similar fashion or "cleanup"
 	command is used.
