@@ -356,7 +356,8 @@ class LAFSBackup(LAFSOperation):
 							path, self.conf.destination.encoding )
 						if enc: obj['enc'] = enc
 						ts, size = op.attrgetter('st_mtime', 'st_size')(os.stat(path))
-						meta = ['st_mtime:{:.3f}'.format(ts), 'st_size:{}'.format(size)]
+						meta = [ 'st_mtime:{:.3f}'.format(ts),
+							'st_size:{}'.format(size), 'enc:{}'.format(enc) ]
 					else: # symlink
 						enc, contents = None, os.readlink(path)
 						meta, size = ['symlink:' + contents], len(contents)
