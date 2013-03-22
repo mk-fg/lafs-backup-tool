@@ -12,7 +12,8 @@ from subprocess import Popen, PIPE
 from contextlib import contextmanager
 from time import time
 from hashlib import sha256
-import os, sys, io, fcntl, stat, re, types, json, logging, traceback
+import os, sys, io, fcntl, stat, errno, re
+import types, json, logging, traceback
 
 from twisted.internet import reactor, defer
 from twisted.python.failure import Failure
@@ -442,6 +443,10 @@ class LAFSBackup(LAFSOperation):
 
 		for path, dirs, files in os.walk('.', topdown=True, onerror=_error_handler):
 			p = path.lstrip('./')
+			try: os.lstat(p)
+			except (OSError, IOError) as err:
+				if err.errno != errno.ENOENT: raise
+				continue # transient "cache" stuff left by find?
 			yield (p, self.meta_get(p or '.'))
 
 			i_off = 0
