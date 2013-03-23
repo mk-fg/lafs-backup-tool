@@ -160,9 +160,9 @@ class EntryCacheDB(object):
 			caps_filter = 'WHERE cap IN ({})'.format(', '.join(['?']*len(caps)))
 			params.extend(caps)
 		with self._cursor( 'SELECT * FROM backups'
-				' {} ORDER BY ts_check LIMIT 1'.format(caps_filter) ) as c:
+				' {} ORDER BY ts_check LIMIT 1'.format(caps_filter), params ) as c:
 			row = c.fetchone()
-			if not row: raise KeyError(fields)
+			if not row: raise KeyError(caps)
 			return row['cap']
 
 	def backup_checked(self, cap):
