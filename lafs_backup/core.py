@@ -383,7 +383,7 @@ class LAFSBackup(LAFSOperation):
 					contents = nodes.pop(path, dict())
 					dc = self.entry_cache.duplicate_check(
 						self.meta_dump(obj), generation, sorted(
-							'{}+{}'.format(f['cap'], meta_dump(f)) for f in contents.viewvalues() ) )
+							'{}+{}'.format(f['cap'], self.meta_dump(f)) for f in contents.viewvalues() ) )
 					cap = dc.use()\
 						if not self.conf.operation.disable_deduplication else None
 					if not cap:
@@ -649,7 +649,9 @@ class LAFSCheck(LAFSOperation):
 			fmt_ok=None, fmt_err='{}', pick=True,
 			lease=True, repair=False, err_out=False ):
 		super(LAFSCheck, self).__init__(conf)
-		if pick: caps = [self.entry_cache.backup_get_least_recently_checked(caps)]
+		if pick:
+			try: caps = [self.entry_cache.backup_get_least_recently_checked(caps)]
+			except KeyError: caps = list() # nothing to check
 		self.caps, self.lease, self.repair = caps, lease, repair
 		self.fmt_ok, self.fmt_err, self.err_out = fmt_ok, fmt_err, err_out
 		self.client = http.HTTPClient(**conf.http)
