@@ -381,11 +381,9 @@ class LAFSBackup(LAFSOperation):
 				else:
 					# Directory node
 					contents = nodes.pop(path, dict())
-					# Two dirnodes with links to same caps can be considered identical,
-					#  if not for the metadata attached to these caps, hence the [path] component
 					dc = self.entry_cache.duplicate_check(
-						self.meta_dump(obj), generation,
-						[path] + map(op.itemgetter('cap'), contents.viewvalues()) )
+						self.meta_dump(obj), generation, sorted(
+							'{}+{}'.format(f['cap'], meta_dump(f)) for f in contents.viewvalues() ) )
 					cap = dc.use()\
 						if not self.conf.operation.disable_deduplication else None
 					if not cap:
