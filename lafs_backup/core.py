@@ -442,7 +442,7 @@ class LAFSBackup(LAFSOperation):
 
 		for path, dirs, files in os.walk('.', topdown=True, onerror=_error_handler):
 			p = path.lstrip('./')
-			try: os.lstat(p)
+			try: os.lstat(p or '.')
 			except (OSError, IOError) as err:
 				if err.errno != errno.ENOENT: raise
 				continue # transient "cache" stuff left by find?
