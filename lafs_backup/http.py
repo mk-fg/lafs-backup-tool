@@ -60,8 +60,10 @@ class MultipartDataSender(object):
 	#: Single read/write size
 	chunk_size = 64 * 2**10 # 64 KiB
 
-	def __init__(self, fields, boundary):
+	def __init__( self, fields, boundary,
+			file_rewind=True, file_close=False ):
 		self.fields, self.boundary = fields, boundary
+		self.file_rewind, self.file_close = file_rewind, file_close
 		self.task = None
 
 		## "Transfer-Encoding: chunked" doesn't work with SkyDrive,
@@ -75,12 +77,14 @@ class MultipartDataSender(object):
 
 	@defer.inlineCallbacks
 	def upload_file(self, src, dst):
+		if self.file_rewind: src.seek(0)
 		try:
 			while True:
 				chunk = src.read(self.chunk_size)
 				if not chunk: break
 				yield dst.write(chunk)
-		finally: src.close()
+		finally:
+			if self.file_close: src.close()
 
 	@defer.inlineCallbacks
 	def send_form(self, dst=None):

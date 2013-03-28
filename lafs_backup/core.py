@@ -67,14 +67,25 @@ class FileEncoder(io.FileIO):
 				return 'xz', cls(path, **(conf.xz.options or dict()))
 		return None, open(path)
 
-	size = size_enc = 0
 	ratio = property(lambda s: (s.size_enc / float(s.size)) if s.size else 1)
 
-	def __init__(self, path, **xz_kwz):
+	def __init__(self, path, **enc_optz):
 		super(FileEncoder, self).__init__(path)
+		self.enc_optz = enc_optz
+		self.encoder_init()
+
+	def encoder_init(self):
 		if not lzma: raise ImportError('Missing lzma module')
-		self.ctx = lzma.LZMACompressor(**xz_kwz)
+		self.ctx = lzma.LZMACompressor(**self.enc_optz)
 		self.buff = self.ctx.compress('') # header
+		self.size = self.size_enc = 0
+
+	def seek(self, pos, whence=os.SEEK_SET):
+		if pos != 0 or whence != os.SEEK_SET:
+			raise ValueError('Only seeks to the beginning of the file are implemented')
+		if self.closed: raise ValueError('I/O operation on closed file')
+		super(FileEncoder, self).seek(0)
+		self.encoder_init()
 
 	def read(self, n=-1):
 		buff, self.buff = self.buff, ''
