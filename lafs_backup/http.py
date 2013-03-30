@@ -294,7 +294,6 @@ class HTTPClient(object):
 		if self.debug_requests:
 			log.debug( 'HTTP request: {} {} (h: {}, enc: {}, dec: {}, data: {!r})'\
 				.format(method, url[:100], headers, encode, decode, data) )
-		method, body = method.lower(), None
 		headers = dict() if not headers else headers.copy()
 		headers.setdefault('User-Agent', 'lafs-backup-tool')
 
@@ -317,7 +316,9 @@ class HTTPClient(object):
 				data = (ChunkingFileBodyProducer if chunks else FileBodyProducer)(data)
 
 		if isinstance(url, unicode): url = url.encode('utf-8')
-		if isinstance(method, unicode): method = method.encode('ascii')
+		if isinstance(method, unicode): method = method.lower().encode('ascii')
+		if decode not in ['json', None]:
+			raise ValueError('Unknown response decoding method: {}'.format(decode))
 
 		code = None
 		try:
@@ -337,7 +338,6 @@ class HTTPClient(object):
 			else: res.deliverBody(LineQueue(data, queue_lines))
 
 			data = yield data
-			assert decode in ['json', None], decode
 			defer.returnValue(json.loads(data) if decode is not None else data)
 
 		except HTTPClientError as err:
