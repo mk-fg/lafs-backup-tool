@@ -65,9 +65,6 @@ class MultipartDataSender(object):
 		self.fields, self.boundary = fields, boundary
 		self.file_rewind, self.file_close = file_rewind, file_close
 		self.task = None
-
-		## "Transfer-Encoding: chunked" doesn't work with SkyDrive,
-		##  so calculate_length() must be called to replace it with some value
 		self.length = UNKNOWN_LENGTH
 
 	def calculate_length(self):
@@ -140,19 +137,22 @@ class ChunkingFileBodyProducer(object):
 	#: Single read/write size
 	chunk_size = 64 * 2**10 # 64 KiB
 
-	def __init__(self, src):
+	def __init__(self, src, file_rewind=True, file_close=False):
 		self.src = src
 		self.task = None
 		self.length = UNKNOWN_LENGTH
+		self.file_rewind, self.file_close = file_rewind, file_close
 
 	@defer.inlineCallbacks
 	def upload_file(self, src, dst):
+		if self.file_rewind: src.seek(0)
 		try:
 			while True:
 				chunk = src.read(self.chunk_size)
 				if not chunk: break
 				yield dst.write(chunk)
-		finally: src.close()
+		finally:
+			if self.file_close: src.close()
 
 	def startProducing(self, dst):
 		if not self.task: self.task = self.upload_file(self.src, dst)
