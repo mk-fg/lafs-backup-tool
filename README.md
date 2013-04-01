@@ -34,7 +34,8 @@ without any installation.
 
 * [Python 2.7 (not 3.X)](http://python.org) with sqlite3 support
 * [layered-yaml-attrdict-config](https://github.com/mk-fg/layered-yaml-attrdict-config)
-* [Twisted](http://twistedmatrix.com) (core components)
+* [Twisted](http://twistedmatrix.com) - core and web components, plus conch if
+	manhole (ssh debug shell, see below) is enabled
 * [CFFI](http://cffi.readthedocs.org) (for fs ACL and capabilities support)
 * (optional) [pyliblzma](https://launchpad.net/pyliblzma) - if xz compression is used
 
@@ -397,8 +398,7 @@ useful keys (list might be a bit outdated):
 - `lafs_op` - instance of LAFSOperation subclass, representing currently running
 	operation.
 
-- `optz` - argparse namespace object with command-line options.
-- `optz_parser` - argparse ArgumentParser object.
+- `optz`, `optz_parser` - argparse namespace and ArgumentParser objects.
 
 There's also an option ("on_signal") to create manhole socket only after
 receiving signal, so that it'd be more secure and multiple invokations of the
