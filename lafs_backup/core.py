@@ -160,13 +160,14 @@ def log_web_failure(log, err, err_lid=''):
 			else: log.error('{}{} {}: {}'.format(err_lid, lid, type(err), err))
 
 
+class OperationalError(Exception): pass
+class CleanBreak(Exception): pass
+
 class LAFSOperation(object):
 
 	conf_required = None
 	conf_required_init = 'source.entry_cache.path',
 	failure = None # used to indicate that some error was logged
-
-	class OperationalError(Exception): pass
 
 	def __init__(self, conf):
 		self.conf = conf
@@ -190,6 +191,11 @@ class LAFSOperation(object):
 				deferreds, fireOnOneCallback=True, fireOnOneErrback=True )
 		except defer.FirstError as err: err.subFailure.raiseException()
 		defer.returnValue(res)
+
+	def reactor_heartbeat(self):
+		'A kludge to make sync code behave nicer with twisted.'
+		reactor.iterate(0.05)
+		return reactor.running # should be checked to stop activity
 
 	def log_failure(self, err):
 		'Log failure and set the self.failure flag.'
@@ -305,7 +311,7 @@ class LAFSBackup(LAFSOperation):
 
 		if not self.conf.operation.queue_only:
 			self.log.debug('Uploading stuff from queue file: {}'.format(path_queue))
-			root_cap = (yield self.backup_queue(basename(path), path_queue))\
+			root_cap = yield self.backup_queue(basename(path), path_queue)
 
 		os.chdir(path_origin)
 
@@ -346,6 +352,9 @@ class LAFSBackup(LAFSOperation):
 
 		with open(path_queue) as queue:
 			for line in queue:
+				if not self.reactor_heartbeat():
+					raise CleanBreak('Detected reactor-stop event, stopping')
+
 				line = line.strip()
 				self.log.noise('Processing entry: /{}'.format(line))
 
@@ -452,6 +461,9 @@ class LAFSBackup(LAFSOperation):
 			check_filters, filters=self.conf.filter, log=self.log )
 
 		for path, dirs, files in os.walk('.', topdown=True, onerror=_error_handler):
+			if not self.reactor_heartbeat():
+				raise CleanBreak('Detected reactor-stop event, stopping')
+
 			p = path.lstrip('./')
 			try: os.lstat(p or '.')
 			except (OSError, IOError) as err:
@@ -556,7 +568,7 @@ class LAFSCleanup(LAFSOperation):
 					if shareid: p(shareid)
 
 		if self.failure: # some error was logged, shouldn't generally happen
-			raise self.OperationalError('Some error was detected during share enumeration')
+			raise OperationalError('Some error was detected during share enumeration')
 
 
 	@defer.inlineCallbacks
@@ -954,9 +966,12 @@ def main(argv=None, config=None):
 			if isinstance(res, (Exception, Failure)):
 				global exit_code
 				exit_code = 1
-				log_web_failure(log, res)
+				if isinstance(res, CleanBreak) or res.check(CleanBreak):
+					log.info(res.value.message)
+					res = None
+				else: log_web_failure(log, res)
 			if reactor.running: reactor.stop()
-			return res # will still be raised/logged by twisted
+			return res # will still be raised/logged by twisted, if not defused
 		reactor.callWhenRunning(
 			lambda: defer.maybeDeferred(op).addBoth(_stop) )
 
