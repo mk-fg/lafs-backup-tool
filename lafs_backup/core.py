@@ -160,6 +160,7 @@ def log_web_failure(log, err, err_lid=''):
 			else: log.error('{}{} {}: {}'.format(err_lid, lid, type(err), err))
 
 
+
 class OperationalError(Exception): pass
 class CleanBreak(Exception): pass
 

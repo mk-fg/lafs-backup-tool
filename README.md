@@ -377,3 +377,25 @@ large files at the moment~~ needed functionality wasn't there before.
 Plus twisted is also a basis for tahoe-lafs implementation, so there's a good
 chance it's already available (unlike gevent, used in requests.async /
 grequests).
+
+
+##### SSH debug manhole
+
+Can be enabled in configuration ("manhole" section).
+
+Namespace used there is persistent between connections and contains following
+useful keys (list might be a bit outdated):
+
+- `config`
+
+	Configuration object (AttrDict instance), can be queried by
+	attributes (e.g. `config.http.ca_certs_files`).
+
+	Changes *may* have some effect on the running operation, but it's not
+	guaranteed or supported.
+
+- `lafs_op` - instance of LAFSOperation subclass, representing currently running
+	operation.
+
+- `optz` - argparse namespace object with command-line options.
+- `optz_parser` - argparse ArgumentParser object.
