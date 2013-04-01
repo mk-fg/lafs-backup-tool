@@ -222,7 +222,7 @@ class LAFSBackup(LAFSOperation):
 			conf.destination.encoding.xz.path_filter,
 			lambda v, c=_filter_actions: c.get(v, v), force_str=False ))
 
-		self.http = http.HTTPClient(**conf.http)
+		self.client = http.HTTPClient(**conf.http)
 		self.meta = meta.XMetaHandler()
 
 	def _compile_filters(self, filters, val=lambda v: v, force_str=True):
@@ -323,7 +323,7 @@ class LAFSBackup(LAFSOperation):
 					fcntl.lockf(dst, fcntl.LOCK_EX)
 					dst.write('{} {} {}\n'.format(datetime.now().isoformat(), path, root_cap))
 			if self.conf.destination.result.append_to_lafs_dir:
-				yield self.http.request_with_retries(
+				yield self.client.request_with_retries(
 					'{}/{}/{}?t=uri'.format( self.conf.destination.url.rstrip('/'),
 						self.conf.destination.result.append_to_lafs_dir.strip('/'),
 						basename(path) ), 'put', data=root_cap )
@@ -428,7 +428,7 @@ class LAFSBackup(LAFSOperation):
 		defer.returnValue(root['cap'])
 
 	def update_file(self, data):
-		return self.http.request_with_retries(self.conf.destination.url, 'put', data=data)
+		return self.client.request_with_retries(self.conf.destination.url, 'put', data=data)
 
 	def update_dir(self, nodes):
 		contents = dict()
@@ -438,7 +438,7 @@ class LAFSBackup(LAFSOperation):
 			contents[name] = (
 				'dirnode' if stat.S_ISDIR(int(node.get('mode', '0'), 8)) else 'filenode',
 				dict(ro_uri=cap, metadata=node) )
-		return self.http.request_with_retries( self.conf.destination.url
+		return self.client.request_with_retries( self.conf.destination.url
 			+ '?t=mkdir-immutable', 'post', encode='json', data=contents )
 
 
