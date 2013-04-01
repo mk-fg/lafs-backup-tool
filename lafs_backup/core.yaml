@@ -162,8 +162,17 @@ manhole:
   #  for general debugging or to test/produce some artificial state.
   # Disabled by default. Can be enabled by specifying client ssh key and endpoint to listen on.
 
+  # endpoint specifies an interface/port for manhole to listen on.
   # For twisted endpoint syntax, see twisted.internet.endpoints.html#clientFromString
+  # See also "signal" option below.
   endpoint: # set only if you want manhole enabled, example: tcp:8022:interface=localhost
+
+  # If set, will make tool create manhole socket
+  #  (see "endpoint" option above) only after receiving specified signal.
+  # Signal can be specified as name
+  #  (with or without SIG prefix, examples: INT, TERM, SIGUSR1) or an integer.
+  # Sending same signal again will close the socket.
+  on_signal:
 
   # Authorized client(s) public SSH key(s).
   # Can be either single key string or a list of keys, newlines will be folded.

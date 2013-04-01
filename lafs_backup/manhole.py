@@ -12,6 +12,7 @@ from twisted.conch import manhole, telnet, manhole_ssh, checkers as conchc
 from twisted.conch.ssh import keys
 from twisted.conch.insults import insults
 from twisted.internet import reactor, endpoints, defer
+from twisted.application import strports
 
 
 class AuthorizedKeysChecker(conchc.SSHPublicKeyDatabase):
@@ -64,13 +65,10 @@ class CustomKeysConch(manhole_ssh.ConchFactory):
 				setattr(self, k, {'ssh-rsa': keys.Key.fromString(v)})
 
 
-def create(endpoint, authorized_keys, server_keys=None, namespace=dict()):
-	# Unfortunately, these don't work unless we're running as root
-	#  c = credc.PluggableAuthenticationModulesChecker: PAM
-	#  c = conchc.SSHPublicKeyDatabase() # ~/.ssh/authorized_keys
+def build_service(endpoint, authorized_keys, server_keys=None, namespace=dict()):
 	realm = manhole_ssh.TerminalRealm()
 	realm.chainedProtocolFactory = lambda:\
 		insults.ServerProtocol(ModifiedColoredManhole, namespace)
 	factory = CustomKeysConch(
 		portal.Portal(realm, [AuthorizedKeysChecker(authorized_keys)]), server_keys )
-	endpoints.serverFromString(reactor, endpoint).listen(factory)
+	return strports.service(endpoint, factory)

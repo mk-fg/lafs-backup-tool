@@ -902,7 +902,7 @@ def main(argv=None, config=None):
 	log = logging.getLogger(__name__)
 
 	## Manhole
-	manhole_ns = None
+	manhole = manhole_ns = None
 	if cfg.manhole.endpoint:
 		from lafs_backup import manhole
 		if not cfg.manhole.client:
@@ -915,11 +915,33 @@ def main(argv=None, config=None):
 		cfg.manhole.client = map(fold_pubkey, cfg.manhole.client)
 		cfg.manhole.server.public = fold_pubkey(cfg.manhole.server.public)
 		cfg.manhole.server.private = fold_pubkey(cfg.manhole.server.private, '\n')
+
 		manhole_ns = dict(test='success!!!')
-		manhole.create( cfg.manhole.endpoint,
-			authorized_keys=cfg.manhole.client,
+		manhole = manhole.build_service(
+			cfg.manhole.endpoint, authorized_keys=cfg.manhole.client,
 			server_keys=(cfg.manhole.server.public, cfg.manhole.server.private),
 			namespace=manhole_ns )
+
+		if not cfg.manhole.on_signal: manhole.startService()
+		else:
+			import signal
+			try:
+				try: signum = int(cfg.manhole.on_signal)
+				except ValueError:
+					signum = cfg.manhole.on_signal.upper()
+					try: signum = getattr(signal, 'SIG{}'.format(signum))
+					except AttributeError: signum = getattr(signal, signum)
+			except Exception as err:
+				parser.error( 'Failed to translate value'
+					' ({!r}) to signal: {}'.format(cfg.manhole.on_signal) )
+			def toggle_manhole(sig, frm, svc=manhole):
+				if not manhole.running:
+					log.info('Starting manhole service (signal {})'.format(sig))
+					reactor.callFromThread(svc.startService)
+				else:
+					log.info('Stopping manhole service (signal {})'.format(sig))
+					reactor.callFromThread(svc.stopService)
+			signal.signal(signum, toggle_manhole)
 
 	## Operation-specific CLI processing
 	if optz.call == 'backup':

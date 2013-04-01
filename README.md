@@ -399,3 +399,7 @@ useful keys (list might be a bit outdated):
 
 - `optz` - argparse namespace object with command-line options.
 - `optz_parser` - argparse ArgumentParser object.
+
+There's also an option ("on_signal") to create manhole socket only after
+receiving signal, so that it'd be more secure and multiple invokations of the
+tool with the same configuration won't try to bind the same socket.
