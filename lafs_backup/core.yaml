@@ -154,3 +154,64 @@ logging: # see http://docs.python.org/library/logging.config.html
   root:
     level: custom
     handlers: [console]
+
+
+manhole:
+  # Manhole interface provides SSH access to interactive python terminal.
+  # It might be useful when app hangs unexpectedly,
+  #  for general debugging or to test/produce some artificial state.
+  # Disabled by default. Can be enabled by specifying client ssh key and endpoint to listen on.
+
+  # For twisted endpoint syntax, see twisted.internet.endpoints.html#clientFromString
+  endpoint: # set only if you want manhole enabled, example: tcp:8022:interface=localhost
+
+  # Authorized client(s) public SSH key(s).
+  # Can be either single key string or a list of keys, newlines will be folded.
+  # client: |
+  #   ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDFc7KNw/YDKKqwyRKeoM3D
+  #     2APvRT0QPBHQAC7ksw2uLks+/MJtdQWi21TSqFTn+bN6ci9JM4+zMSEWs4
+  #     yKELpc8DMqSvCBr225grHW/Q==
+  client:
+
+  # Server keys don't really have to be secret if access is limited to localhost.
+  # Use "ssh-keygen" (included with openssh) to generate these.
+  server:
+
+    # Public SSH key, as produced by e.g. ssh-keygen (will be joined into a single line)
+    public: |
+      ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCkpC6exWYC9OBK8bYZkf2YKNPZS+
+        6cFrt2FvEzgVO4Rj/61+aC/DUmJdRyHwxqibmFHkJQndjV6RCsQ3pdKkYSA1dQ4b
+        5Vt4GdYPAqraMi6wXioWi04WZW+nM+auC07IXtgDUHt3uPEzS+skYyEJKL3QijX+
+        6zeBzs4nm7jl7rM9gWHzB+WIG1hWzqVT1WXH90kg98BJ99DbZYm3Ap4sQO1p+CN1
+        wCns9WZ7pK21ZjHUoQJNpCny5he7aMKMlMbpwnu7b5y4lLjkI1JKqd54n8+wkH/M
+        VMI78PpaYCnRQnok9ljKopx77w4h9aZ1EshsV2jRoZJjsTiSgEbOajxRhl
+
+    # Private SSH key
+    private: |
+      -----BEGIN RSA PRIVATE KEY-----
+      MIIEogIBAAKCAQEApKQunsVmAvTgSvG2GZH9mCjT2UvunBa7dhbxM4FTuEY/+tfm
+      gvw1JiXUch8Maom5hR5CUJ3Y1ekQrEN6XSpGEgNXUOG+VbeBnWDwKq2jIusF4qFo
+      tOFmVvpzPmrgtOyF7YA1B7d7jxM0vrJGMhCSi90Io1/us3gc7OJ5u45e6zPYFh8w
+      fliBtYVs6lU9Vlx/dJIPfASffQ22WJtwKeLEDtafgjdcAp7PVme6SttWYx1KECTa
+      Qp8uYXu2jCjJTG6cJ7u2+cuJS45CNSSqneeJ/PsJB/zFTCO/D6WmAp0UJ6JPZYyq
+      Kce+8OIfWmdRLIbFdo0aGSY7E4koBGzmo8UYZQIDAQABAoIBAHsdZttFQ24sjVid
+      fQ2L9PWGejyAonJIMXAx4bYhHGis54T9U5tZW6kmGsIn45H7YSZhJTfBgXccLGKU
+      pvjp9rHbm7yYwkq4yYzVA2L2qwoecy0wg+rWrj+WUv020MeaIuAhwgX+N8AanZOI
+      HiOr7tn1tFLvFsFPrVmaVWtiICqCS+7sXoh+w2VIGcE6c8RUIRMViTMVAzf9sPMh
+      ixYeOIBjhTl7Tfyt3r+WLscTcJMRRAdJQLyqlSDzLGVX/kcRQAeFf/qTX0vNm0sN
+      M6uHDwhBLUm9+qCtT6yuZ5OLUuUbaAvDXWGAkDHZZFVbZPIbx8UMYikvVxeZXk5M
+      rRrlcnUCgYEA1STjDoc+uURbf1LfC4BPEyrnxxkTHDZgdLC7Lhyr7jxn888+bZlM
+      kgB2ch41+gLUQar2jQObHGi1/CoOLH8TS6kR4CsmZixZ6dSjpY+Wm7jHFuMsttex
+      qgN3AuQ1iiQx1OND5SAUeNuRUHsHb4i5DrepvS05UNgTmgQMxk28Zn8CgYEAxb65
+      lW57i8Cal/Za6pMxvIH2pwRAYnCKU1rQEYkGmJCw/k1aJd86I+Yfl/9AHw1L58Uj
+      upBZERoSeTbdcHEbnEGEScgKWQ+0xTyBLDWURwwqrmxxzBwiIt6hdtOwlJbaEgyA
+      mwN5UAxKiztK/svRod4D//T1vIZa1fMnf7KfNxsCgYB/1kbksNM69TfXjtG+KS/E
+      NEidjnl6w1ZoxpMNnh60ncBPZ+5ud7KIIwTnfx0qnUXHOQ31F8ORb3AvFN45a+Ib
+      0ASrqdW3FES9TU71fsB7F4E5RfnMlGO3r6pSrqM5/mlw4PoY03vT3QUz+wZDrAIq
+      RJfmodgtl9tx1Zn/2iH0awKBgF+XWF1dYEnpnJHzXHXjG/r1lIeebYVow+WRk922
+      MMMVxwnX2MlQBOoPt5whnxyjr9rlmOT6HKRAx0djd16AvwklPs7v7dip2Ag0vHjj
+      mb9SqVtSPxydSP80QjeQE99woRByjMTixAUnO+3cht9vJfKqwaI9B4HQLR8aATEg
+      5wibAoGAGoC6IMErquKdJCNLmse32fOY9O2Rzt2/9qATx4fmWJeef0d2ckLt3nqV
+      sQsHUwmAO1pEy/LUlv72SRt/voB9jiPvp9HTVeHIBi9hYnlSWUVhpFPk9WI89zhn
+      jSF8lwdYUGteETbvOPUH5Sil0qCv4nCJzqoBXUAhQhw2aJ6ZWZk=
+      -----END RSA PRIVATE KEY-----

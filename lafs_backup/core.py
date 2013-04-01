@@ -900,6 +900,26 @@ def main(argv=None, config=None):
 	twisted_log.PythonLoggingObserver().start()
 	log = logging.getLogger(__name__)
 
+	## Manhole
+	manhole_ns = None
+	if cfg.manhole.endpoint:
+		from lafs_backup import manhole
+		if not cfg.manhole.client:
+			parser.error(( 'Manhole is enabled in configuration (endpoint: {}),'
+				' but no authorized client keys specified.' ).format(cfg.manhole.endpoint))
+		if isinstance(cfg.manhole.client, types.StringTypes):
+			cfg.manhole.client = [cfg.manhole.client]
+		fold_pubkey = lambda key,sep='':\
+			sep.join(it.imap(op.methodcaller('strip'), key.splitlines()))
+		cfg.manhole.client = map(fold_pubkey, cfg.manhole.client)
+		cfg.manhole.server.public = fold_pubkey(cfg.manhole.server.public)
+		cfg.manhole.server.private = fold_pubkey(cfg.manhole.server.private, '\n')
+		manhole_ns = dict(test='success!!!')
+		manhole.create( cfg.manhole.endpoint,
+			authorized_keys=cfg.manhole.client,
+			server_keys=(cfg.manhole.server.public, cfg.manhole.server.private),
+			namespace=manhole_ns )
+
 	## Operation-specific CLI processing
 	if optz.call == 'backup':
 		if optz.disable_deduplication:
@@ -929,7 +949,7 @@ def main(argv=None, config=None):
 				cfg.source.queue.path = optz.reuse_queue
 			cfg.operation.reuse_queue = True
 
-		op = LAFSBackup(cfg).run
+		lafs_op = LAFSBackup(cfg)
 
 	elif optz.call == 'cleanup':
 		caps = set(optz.root_cap).difference({'-'})
@@ -937,31 +957,35 @@ def main(argv=None, config=None):
 			caps.update(it.ifilter(None, (line.strip() for line in sys.stdin)))
 		if optz.enumerate_only and optz.enumerate_shares is False:
 			parser.error('Option --enumerate-only can only be used with --enumerate-shares.')
-		op = LAFSCleanup( cfg, caps,
+		lafs_op = LAFSCleanup( cfg, caps,
 			optz.generation, optz.up_to,
-			optz.enumerate_shares, optz.enumerate_only ).run
+			optz.enumerate_shares, optz.enumerate_only )
 
 	elif optz.call == 'list':
 		if optz.generations is not None:
 			optz.generations = set(it.chain.from_iterable(optz.generations))
-		op = LAFSList(cfg, list_dangling_gens=optz.generations).run
+		lafs_op = LAFSList(cfg, list_dangling_gens=optz.generations)
 
 	elif optz.call == 'check':
 		caps = set(optz.root_cap).difference({'-'})
 		if '-' in optz.root_cap:
 			caps.update(it.ifilter(None, (line.strip() for line in sys.stdin)))
-		op = LAFSCheck( cfg, caps,
+		lafs_op = LAFSCheck( cfg, caps,
 				fmt_ok=optz.healthy_format, fmt_err=optz.format,
 				pick=optz.least_recently_checked, lease=not optz.no_lease,
-				repair=optz.repair, err_out=optz.error_output ).run\
+				repair=optz.repair, err_out=optz.error_output )\
 			if caps or optz.least_recently_checked else None
 
-	elif optz.call == 'dump_config': op = ft.partial(cfg.dump, sys.stdout)
+	elif optz.call == 'dump_config': lafs_op = ft.partial(cfg.dump, sys.stdout)
 
 	else: parser.error('Unrecognized command: {}'.format(optz.call))
 
 	## Actual work
-	if op:
+	if lafs_op:
+		if manhole_ns: # populate manhole namespace with relevant objects
+			manhole_ns.update( config=cfg, optz=optz,
+				optz_parser=parser, lafs_op=lafs_op, log=log )
+
 		def _stop(res):
 			if isinstance(res, (Exception, Failure)):
 				global exit_code
@@ -972,8 +996,10 @@ def main(argv=None, config=None):
 				else: log_web_failure(log, res)
 			if reactor.running: reactor.stop()
 			return res # will still be raised/logged by twisted, if not defused
+
 		reactor.callWhenRunning(
-			lambda: defer.maybeDeferred(op).addBoth(_stop) )
+			lambda: defer.maybeDeferred(
+				lafs_op.run if not callable(lafs_op) else lafs_op ).addBoth(_stop) )
 
 		log.debug('Starting...')
 		reactor.run()
