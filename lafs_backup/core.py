@@ -115,11 +115,12 @@ def stopwatch_wrapper(func, *argz, **kwz):
 def token_bucket(metric, spec):
 	try:
 		try: interval, burst = spec.rsplit(':', 1)
-		except ValueError: burst = 1.0
+		except (ValueError, AttributeError): interval, burst = spec, 1.0
 		else: burst = float(burst)
-		try: a, b = interval.split('/', 1)
-		except ValueError: interval = float(interval)
-		else: interval = op.truediv(*it.imap(float, [a, b]))
+		if is_str(interval):
+			try: a, b = interval.split('/', 1)
+			except ValueError: interval = float(interval)
+			else: interval = op.truediv(*it.imap(float, [a, b]))
 		if min(interval, burst) < 0: raise ValueError()
 	except:
 		raise ValueError('Invalid format for rate limit (metric: {}): {!r}'.format(metric, spec))
@@ -956,10 +957,10 @@ def main(argv=None, config=None):
 			if cfg.destination.encoding.xz.enabled and not lzma:
 				raise ImportError('Unable to import lzma module')
 			for metric, spec in cfg.operation.rate_limit.viewitems():
-				if spec:
-					spec = token_bucket(metric, spec)
-					next(spec)
-					cfg.operation.rate_limit[metric] = spec
+				if not spec: continue
+				spec = token_bucket(metric, spec)
+				next(spec)
+				cfg.operation.rate_limit[metric] = spec
 
 		if optz.reuse_queue is not False:
 			if optz.force_queue_rebuild:

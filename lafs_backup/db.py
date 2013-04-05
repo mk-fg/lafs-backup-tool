@@ -132,9 +132,9 @@ class EntryCacheDB(object):
 
 
 	def backup_add(self, name, cap, gen):
-		with self._cursor(
+		self._query(
 			'INSERT INTO backups (name, cap, generation, ts)'
-			' VALUES (?, ?, ?, ?)', (name, cap, gen, time()) ): pass
+			' VALUES (?, ?, ?, ?)', (name, cap, gen, time()) )
 
 	def backup_get(self, name=None, cap=None):
 		fields = OrderedDict((k, v) for k,v in dict(name=name, cap=cap).viewitems() if v)
