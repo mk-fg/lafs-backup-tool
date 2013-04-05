@@ -465,11 +465,8 @@ class LAFSBackup(LAFSOperation):
 			if not self.reactor_heartbeat():
 				raise CleanBreak('Detected reactor-stop event, stopping')
 
-			p = path.lstrip('./')
-			try: os.lstat(p or '.')
-			except (OSError, IOError) as err:
-				if err.errno != errno.ENOENT: raise
-				continue # transient "cache" stuff left by find?
+			p = path if not p.startswith('./') else path[2:]
+			if p == '.': p = ''
 			yield (p, self.meta_get(p or '.'))
 
 			i_off = 0
