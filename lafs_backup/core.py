@@ -908,7 +908,7 @@ def main(argv=None, config=None):
 		if not cfg.manhole.client:
 			parser.error(( 'Manhole is enabled in configuration (endpoint: {}),'
 				' but no authorized client keys specified.' ).format(cfg.manhole.endpoint))
-		if isinstance(cfg.manhole.client, types.StringTypes):
+		if is_str(cfg.manhole.client):
 			cfg.manhole.client = [cfg.manhole.client]
 		fold_pubkey = lambda key,sep='':\
 			sep.join(it.imap(op.methodcaller('strip'), key.splitlines()))
