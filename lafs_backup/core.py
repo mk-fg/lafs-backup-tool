@@ -466,7 +466,7 @@ class LAFSBackup(LAFSOperation):
 			if not self.reactor_heartbeat():
 				raise CleanBreak('Detected reactor-stop event, stopping')
 
-			p = path if not p.startswith('./') else path[2:]
+			p = path if not path.startswith('./') else path[2:]
 			if p == '.': p = ''
 			yield (p, self.meta_get(p or '.'))
 
