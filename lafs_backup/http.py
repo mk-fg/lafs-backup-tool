@@ -4,7 +4,7 @@ import itertools as it, operator as op, functools as ft
 from urllib import urlencode, quote
 from mimetypes import guess_type
 from collections import Mapping
-import os, sys, io, re, types, json
+import os, sys, io, re, types, json, logging
 
 from OpenSSL import crypto
 from zope.interface import implements
@@ -18,9 +18,6 @@ from twisted.web.http_headers import Headers
 from twisted.web import http
 from twisted.protocols.basic import LineReceiver
 from twisted.internet import defer, reactor, ssl, task, protocol
-
-import logging
-log = logging.getLogger(__name__)
 
 
 
@@ -256,6 +253,11 @@ class HTTPClient(object):
 		assert 'url' not in request_kwz and 'method' not in request_kwz
 		request_kwz['url'], request_kwz['method'] = url, method
 
+		log = request_kwz.get('log')
+		if not log:
+			log = logging.getLogger(__name__)
+			request_kwz['log'] = log
+
 		# Shortcut for simple cases
 		if not self.retry or self.retry.attempts <= 1:
 			defer.returnValue((yield self.request(**request_kwz)))
@@ -287,10 +289,12 @@ class HTTPClient(object):
 	@defer.inlineCallbacks
 	def request( self, url, method='get', decode=None,
 			encode=None, data=None, chunks=True, headers=dict(),
-			raise_for=dict(), queue_lines=None ):
+			raise_for=dict(), queue_lines=None, log=None ):
 		'''Make HTTP(S) request.
 			decode (response body) = None | json
 			encode (data) = None | json | form | files'''
+		if not log: log = logging.getLogger(__name__)
+
 		if self.debug_requests:
 			log.debug( 'HTTP request: {} {} (h: {}, enc: {}, dec: {}, data: {!r})'\
 				.format(method, url[:100], headers, encode, decode, data) )
