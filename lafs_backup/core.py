@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from time import time
 from hashlib import sha256
 import os, sys, io, fcntl, stat, errno, re
-import types, json, logging, traceback
+import types, json, logging, inspect, traceback
 
 from twisted.internet import reactor, defer
 from twisted.python.failure import Failure
@@ -170,6 +170,7 @@ class LAFSOperation(object):
 	conf_required = None
 	conf_required_init = 'source.entry_cache.path',
 	failure = None # used to indicate that some error was logged
+	debug_frame = None # frame of a long-running loop method or None
 
 	def __init__(self, conf):
 		self.conf = conf
@@ -334,6 +335,8 @@ class LAFSBackup(LAFSOperation):
 
 	@defer.inlineCallbacks
 	def backup_queue(self, backup_name, path_queue):
+		self.debug_frame = inspect.currentframe()
+
 		nodes = defaultdict(dict)
 		generation = self.entry_cache.get_new_generation()
 		self.log.debug('Backup generation number: {}'.format(generation))
@@ -456,6 +459,7 @@ class LAFSBackup(LAFSOperation):
 					raise RuntimeError('Failed to run "sort | tac" binaries (coreutils).')
 
 	def queue_generator(self, path):
+		self.debug_frame = inspect.currentframe()
 
 		def _error_handler(err): raise err
 
@@ -528,6 +532,8 @@ class LAFSCleanup(LAFSOperation):
 
 	@defer.inlineCallbacks
 	def run_enumerate(self, baks):
+		self.debug_frame = inspect.currentframe()
+
 		# Operation is quite similar to what "check" does
 		with self.enumerate_output(self.enumerate_shares) as dst:
 			p = ft.partial(print, file=dst)
@@ -610,6 +616,7 @@ class LAFSCleanup(LAFSOperation):
 					count_pe += self.entry_cache.delete_generations(gen_max, exact=False)
 
 		if not self.enumerate_only and caps_found:
+			self.debug_frame = inspect.currentframe()
 			self.log.debug('Removing root caps from entry_cache')
 			for cap_key, bak in caps_found.viewitems():
 				if self.delete_from_lafs_dir: yield self.delete_from_lafs_dir(bak['name'])
@@ -635,6 +642,7 @@ class LAFSList(LAFSOperation):
 		self.list_dangling_gens = list_dangling_gens
 
 	def run(self):
+		self.debug_frame = inspect.currentframe()
 		gen_max = self.entry_cache.get_new_generation()
 
 		gens = set()
@@ -680,6 +688,8 @@ class LAFSCheck(LAFSOperation):
 
 	@defer.inlineCallbacks
 	def run(self):
+		self.debug_frame = inspect.currentframe()
+
 		class NotFoundError(Exception): pass
 		p = print if not self.err_out else ft.partial(print, file=sys.stderr)
 		errors = False
@@ -1005,9 +1015,11 @@ def main(argv=None, config=None):
 	if lafs_op:
 		if manhole_ns: # populate manhole namespace with relevant objects
 			manhole_ns.update( config=cfg, optz=optz,
-				optz_parser=parser, lafs_op=lafs_op, log=log )
+				optz_parser=parser, lafs_op=lafs_op, log=log,
+				inspect=inspect, traceback=traceback )
 
 		def _stop(res):
+			lafs_op.debug_frame = None
 			if isinstance(res, (Exception, Failure)):
 				global exit_code
 				exit_code = 1

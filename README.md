@@ -398,8 +398,20 @@ useful keys (list might be a bit outdated):
 - `lafs_op` - instance of LAFSOperation subclass, representing currently running
 	operation.
 
+	Should have a non-None "debug_frame" attribute set to a frame object of a
+	long-running loop operation, so that it's possible to inspect it for exact
+	line of code it runs, defined locals, etc.
+
 - `optz`, `optz_parser` - argparse namespace and ArgumentParser objects.
 
 There's also an option ("on_signal") to create manhole socket only after
 receiving signal, so that it'd be more secure and multiple invokations of the
 tool with the same configuration won't try to bind the same socket.
+
+See python 2.X [data
+model](http://docs.python.org/2/reference/datamodel.html#index-59) and
+[inspect](http://docs.python.org/2/library/inspect.html) doc sections on how to
+debug running code.
+
+Note that it should also be easy to reconfigure (e.g. set it to debug level, add
+logfile handler, etc) logging from there.
