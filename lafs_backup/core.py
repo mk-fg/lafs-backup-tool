@@ -338,7 +338,13 @@ class LAFSBackup(LAFSOperation):
 		self.debug_frame = inspect.currentframe()
 
 		nodes = defaultdict(dict)
-		generation = self.entry_cache.get_new_generation()
+		generation = self.entry_cache.get_generation(next=not self.conf.operation.try_resume)
+		if self.conf.operation.try_resume:
+			try: backup = self.entry_cache.backup_get_gen(generation)
+			except KeyError: pass
+			else:
+				self.log.debug('No incomplete backups detected, starting a new one')
+				generation = self.entry_cache.get_generation()
 		self.log.debug('Backup generation number: {}'.format(generation))
 
 		rate_limits = self.conf.operation.rate_limit
@@ -643,7 +649,7 @@ class LAFSList(LAFSOperation):
 
 	def run(self):
 		self.debug_frame = inspect.currentframe()
-		gen_max = self.entry_cache.get_new_generation()
+		gen_max = self.entry_cache.get_generation()
 
 		gens = set()
 		for i, bak in enumerate( self.entry_cache\
@@ -808,6 +814,9 @@ def main(argv=None, config=None):
 				' even if one already exists and is recent enough to be reused.')
 		cmd.add_argument('--disable-deduplication', action='store_true',
 			help='Make no effort to de-duplicate data (should still work on tahoe-level for files).')
+		cmd.add_argument('-r', '--try-resume', action='store_true',
+			help='If last-gen backup was not finished (no top-level cap recorded) - reuse'
+				' same generation number, bumping and updating only paths with lesser number.')
 
 	with subcommand('cleanup',
 			help='Remove the backup from local caches and unlink from'
@@ -971,6 +980,7 @@ def main(argv=None, config=None):
 				spec = token_bucket(metric, spec)
 				next(spec)
 				cfg.operation.rate_limit[metric] = spec
+			cfg.operation.try_resume = optz.try_resume
 
 		if optz.reuse_queue is not False:
 			if optz.force_queue_rebuild:

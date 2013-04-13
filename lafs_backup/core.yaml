@@ -106,6 +106,7 @@ operation:
   queue_only: false # only generate upload queue file, don't upload anything
   reuse_queue: false # don't generate upload queue file, use existing one as-is
   disable_deduplication: false # make no effort to de-duplicate data (should still work on tahoe-level for files)
+  try_resume: false # try reusing last backup gen number, updating only paths not yet bumped to it
 
   # Rate limiting might be useful to avoid excessive cpu/net usage on nodes,
   #  and especially when uploading to rate-limited api's (like free cloud storages).

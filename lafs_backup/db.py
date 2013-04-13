@@ -14,11 +14,12 @@ class BackupEntry(object):
 		if extras: self.key += '\0' + '\0'.join(extras)
 
 	def use(self):
-		with self.q( 'SELECT cap'
+		with self.q( 'SELECT cap, generation'
 				' FROM object_cache WHERE metadata_dump = ?'
 				' LIMIT 1', (self.key,) ) as c:
 			row = c.fetchone()
 		if not row: return None
+		if self.gen == row['generation']: return row['cap']
 		return self.set(row['cap'])
 
 	def set(self, cap):
@@ -92,15 +93,16 @@ class EntryCacheDB(object):
 			" VALUES ('schema_version', '{}')".format(schema_ver + 1) )
 
 
-	def get_new_generation(self):
+	def get_generation(self, next=True):
+		inc = int(bool(next))
 		with self._cursor('SELECT generation'
 				' FROM object_cache ORDER BY generation DESC LIMIT 1') as c:
 			row = c.fetchone()
-			gen = (row['generation'] + 1) if row else 1
+			gen = (row['generation'] + inc) if row else 1
 		with self._cursor('SELECT generation'
 				' FROM backups ORDER BY generation DESC LIMIT 1') as c:
 			row = c.fetchone()
-			if row: gen = max(gen, row['generation'] + 1)
+			if row: gen = max(gen, row['generation'] + inc)
 		return gen
 
 	def duplicate_check(self, obj_dump, gen, extras=None):
