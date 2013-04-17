@@ -104,14 +104,6 @@ class FileEncoder(io.FileIO):
 	def readinto(b): raise NotImplementedError()
 
 
-@defer.inlineCallbacks
-def stopwatch_wrapper(func, *argz, **kwz):
-	'Simple wrapper to naively time calls'
-	ts = time()
-	res = yield defer.maybeDeferred(func, *argz, **kwz)
-	defer.returnValue((time() - ts, res))
-
-
 def token_bucket(metric, spec):
 	try:
 		try: interval, burst = spec.rsplit(':', 1)
@@ -186,14 +178,41 @@ class LAFSOperation(object):
 			if conf.logging.sql_queries else None
 		self.entry_cache = db.EntryCacheDB(conf.source.entry_cache.path, log=sql_log)
 
-	@staticmethod
 	@defer.inlineCallbacks
-	def first_result(*deferreds):
+	def first_result(self, *deferreds):
 		try:
 			res, idx = yield defer.DeferredList(
 				deferreds, fireOnOneCallback=True, fireOnOneErrback=True )
 		except defer.FirstError as err: err.subFailure.raiseException()
 		defer.returnValue(res)
+
+	@defer.inlineCallbacks
+	def stopwatch_wrapper(self, func, timeouts, *argz, **kwz):
+		'Simple wrapper to naively time and timeout calls.'
+		if timeouts:
+			if not isinstance(timeouts, (tuple, list)):
+				timeouts = float(timeouts)
+				if timeouts <= 0: timeouts = None
+			else: timeouts = list(reversed(list(timeouts)))
+			res_timeout = object()
+
+		ts = time()
+		while True:
+			d, timeout = defer.Deferred(), None
+			if isinstance(timeouts, list):
+				if not timeouts: # reached limit on number of attempts
+					raise OperationalError( 'Operation'
+						' timed-out (cumulative time: {}): {}'.format(time() - ts, func) )
+				timeout = timeouts.pop()
+			elif timeouts: timeout = timeouts
+			if timeout is not None: reactor.callLater(timeout, d.callback, res_timeout)
+
+			res = yield self.first_result(d, defer.maybeDeferred(func, *argz, **kwz))
+			if res is res_timeout:
+				self.log.debug('Timeout for operation ({}s), retrying: {}'.format(timeout, func))
+				continue
+
+			defer.returnValue((time() - ts, res))
 
 	def reactor_heartbeat(self):
 		'A kludge to make sync code behave nicer with twisted.'
@@ -397,7 +416,8 @@ class LAFSBackup(LAFSOperation):
 					cap = dc.use()\
 						if not self.conf.operation.disable_deduplication else None
 					if not cap:
-						ts, cap = yield stopwatch_wrapper(self.update_file, contents)
+						ts, cap = yield self.stopwatch_wrapper(
+							self.update_file, self.conf.operation.timeouts.updates, contents )
 						dc.set(cap)
 						self.log.noise(
 							'Uploaded file (time: {:.1f}s, size: {}, enc: {}): /{}'\
@@ -418,7 +438,8 @@ class LAFSBackup(LAFSOperation):
 					cap = dc.use()\
 						if not self.conf.operation.disable_deduplication else None
 					if not cap:
-						ts, cap = yield stopwatch_wrapper(self.update_dir, contents)
+						ts, cap = yield self.stopwatch_wrapper(
+							self.update_dir, self.conf.operation.timeouts.updates, contents )
 						dc.set(cap)
 						self.log.noise(
 							'Created dirnode (time: {:.1f}s, nodes: {}): /{}'\

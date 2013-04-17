@@ -108,6 +108,17 @@ operation:
   disable_deduplication: false # make no effort to de-duplicate data (should still work on tahoe-level for files)
   try_resume: false # try reusing last backup gen number, updating only paths not yet bumped to it
 
+  # Timeout for some chunks of code execution.
+  # Can be either an float (e.g. 10, infinite number of tries), or a list like [10, 30, 60, 600] (4 tries),
+  #  for different timeouts and limited number of attempts (on consecutive failures).
+  # Set to null, <= 0 or false to disable.
+  # All timeouts are applied at the same places where execution time is logged.
+  timeouts:
+    # Timeouts for update file/dir operations (which may include more than one webapi call).
+    # Tahoe nodes doesn't seem to enforce any limit on these,
+    #  so can wait forever for nodes with hung mounts or backend drivers.
+    updates: [1200, 2400, 3600]
+
   # Rate limiting might be useful to avoid excessive cpu/net usage on nodes,
   #  and especially when uploading to rate-limited api's (like free cloud storages).
   # Only used when uploading objects to the grid, not when building queue file.
