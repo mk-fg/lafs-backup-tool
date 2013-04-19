@@ -162,7 +162,9 @@ class LAFSOperation(object):
 	conf_required = None
 	conf_required_init = 'source.entry_cache.path',
 	failure = None # used to indicate that some error was logged
+
 	debug_frame = None # frame of a long-running loop method or None
+	debug_timeouts = None # set of callables, causing pending op timeout on call (no args)
 
 	def __init__(self, conf):
 		self.conf = conf
@@ -177,6 +179,8 @@ class LAFSOperation(object):
 		sql_log = logging.getLogger('lafs_backup.EntryCacheDB')\
 			if conf.logging.sql_queries else None
 		self.entry_cache = db.EntryCacheDB(conf.source.entry_cache.path, log=sql_log)
+
+		self.debug_timeouts = set()
 
 	@defer.inlineCallbacks
 	def first_result(self, *deferreds):
@@ -199,17 +203,23 @@ class LAFSOperation(object):
 		ts = time()
 		while True:
 			d, timeout = defer.Deferred(), None
+			timeout_cb = lambda: d.called or d.callback(res_timeout)
+
 			if isinstance(timeouts, list):
 				if not timeouts: # reached limit on number of attempts
 					raise OperationalError( 'Operation'
 						' timed-out (cumulative time: {}): {}'.format(time() - ts, func) )
 				timeout = timeouts.pop()
 			elif timeouts: timeout = timeouts
-			if timeout is not None: reactor.callLater(timeout, d.callback, res_timeout)
+			if timeout is not None: reactor.callLater(timeout, timeout_cb)
 
-			res = yield self.first_result(d, defer.maybeDeferred(func, *argz, **kwz))
+			self.debug_timeouts.add(timeout_cb)
+			try: res = yield self.first_result(d, defer.maybeDeferred(func, *argz, **kwz))
+			finally: self.debug_timeouts.discard(timeout_cb)
+
 			if res is res_timeout:
-				self.log.debug('Timeout for operation ({}s), retrying: {}'.format(timeout, func))
+				self.log.debug( 'Timeout for operation ({}s), retrying: {}'\
+					.format(timeout or '[manual break only]', func) )
 				continue
 
 			defer.returnValue((time() - ts, res))

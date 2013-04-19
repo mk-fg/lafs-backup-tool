@@ -398,9 +398,18 @@ useful keys (list might be a bit outdated):
 - `lafs_op` - instance of LAFSOperation subclass, representing currently running
 	operation.
 
-	Should have a non-None "debug_frame" attribute set to a frame object of a
-	long-running loop operation, so that it's possible to inspect it for exact
-	line of code it runs, defined locals, etc.
+	- `lafs_op.debug_frame` - python interpreter frame of the long-running loops.
+
+		Can be inspected to get exact line of code that's currently running, locals,
+		globals, etc. Try `help(lafs_op.debug_frame)`.
+
+	- `lafs_op.debug_timeouts` - set of timeout callbacks for long stateless
+		operations (listed in `operation.timeouts` config section).
+
+		Can be used to simulate timeout condition (and force retry) on running
+		operation that supports timing-out/retry.
+		Callbacks should be present there and can be used manually even if actual
+		timeout is disabled.
 
 - `optz`, `optz_parser` - argparse namespace and ArgumentParser objects.
 
