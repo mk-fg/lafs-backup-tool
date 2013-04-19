@@ -773,10 +773,10 @@ class LAFSCheck(LAFSOperation):
 						self.failure = True # should be handled properly
 						continue
 					if res is not True and not res['results']['healthy']:
-						p(self.fmt_err.format(unit))
+						p(self.fmt_err.format(unit, backup=bak))
 						errors = True
 					elif self.fmt_ok:
-						p(self.fmt_ok.format(unit))
+						p(self.fmt_ok.format(unit, backup=bak))
 				elif unit['type'] == 'stats':
 					self.log.info('Check stats: {}'.format(unit))
 				else:
@@ -895,13 +895,14 @@ def main(argv=None, config=None):
 		cmd.add_argument('-n', '--no-lease', action='store_true',
 			help='Do not extend leases on the backup nodes (extended by default).')
 		cmd.add_argument('-f', '--format',
-			metavar='format_spec', default='{0[path]} ({0[type]})',
+			metavar='format_spec', default='{backup[name]} {0[path]} ({0[type]})',
 			help='Python format string (passed to string.format function)'
 					' to use for logging lines about corrupted nodes.'
 				' "response unit" (as described in tahoe webapi.rst section on stream-deep-check)'
 					' is passed to format function as the only parameter.'
-				' Examples: "{0[path]} ({0[type]})" - default format, "{0}" - full dump of "response unit"'
-					' object (verbose), "path: {0[path]}, repaircap: {0[repaircap]},'
+				' Examples: "{backup[name]} {0[path]} ({0[type]})" - default format,'
+					' "{0}" - full dump of "response unit" object (verbose),'
+					' "path: {0[path]}, repaircap: {0[repaircap]},'
 					' good_hosts: {0[check-results][results][count-good-share-hosts]}".')
 		cmd.add_argument('--healthy-format', metavar='format_spec',
 			help='If specified, healthy paths will be printed'
