@@ -139,10 +139,12 @@ logging: # see http://docs.python.org/library/logging.config.html
   # "custom" level means WARNING/DEBUG/NOISE, depending on CLI options
   warnings: true # capture python warnings
   sql_queries: false # log executed sqlite queries (very noisy, caps will be there)
+  tag: # will be available as a "tag" attribute of all log records, can be used in format
 
   version: 1
   formatters:
     basic:
+      # format: '%(asctime)s :: %(name)s@%(tag)s :: %(levelname)s: %(message)s'
       format: '%(asctime)s :: %(name)s :: %(levelname)s: %(message)s'
       datefmt: '%Y-%m-%d %H:%M:%S'
   handlers:

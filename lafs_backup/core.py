@@ -2,6 +2,25 @@
 #-*- coding: utf-8 -*-
 from __future__ import print_function
 
+
+## Make sure all modules' loggers use custom class
+
+import logging
+
+class TaggedLogger(logging.Logger):
+
+	tag = '' # will be set for all objects of the class
+
+	def makeRecord( self, name, level, fn, lno,
+			msg, args, exc_info, func=None, extra=None ):
+		if extra is None: extra = dict()
+		extra.setdefault('tag', self.tag)
+		return super(TaggedLogger, self).makeRecord(
+			name, level, fn, lno, msg, args, exc_info, func=func, extra=extra )
+
+logging.setLoggerClass(TaggedLogger)
+
+
 import itertools as it, operator as op, functools as ft
 from glob import glob
 from os.path import join, exists, isdir, dirname, basename, abspath
@@ -13,7 +32,7 @@ from contextlib import contextmanager
 from time import time
 from hashlib import sha256
 import os, sys, io, fcntl, stat, errno, re
-import types, json, logging, inspect, traceback
+import types, json, inspect, traceback
 
 from twisted.internet import reactor, defer
 from twisted.python.failure import Failure
@@ -935,6 +954,9 @@ def main(argv=None, config=None):
 
 	## Logging
 	from twisted.python import log as twisted_log
+
+	if cfg.logging.tag:
+		TaggedLogger.tag = cfg.logging.tag
 
 	noise = logging.NOISE = logging.DEBUG - 1
 	logging.addLevelName(noise, 'NOISE')
