@@ -415,8 +415,6 @@ class LAFSBackup(LAFSOperation):
 					raise CleanBreak('Detected reactor-stop event, stopping')
 
 				line = line.strip()
-				self.log.noise('Processing entry: /{}'.format(line))
-
 				try:
 					path, obj = line.rsplit(None, 1)
 				except ValueError: # root dir
@@ -424,6 +422,7 @@ class LAFSBackup(LAFSOperation):
 					path_dir, name = '', backup_name
 				else:
 					path_dir, name = dirname(path), basename(path)
+				self.log.noise('Processing entry: /{} {}'.format(path, obj))
 				cap, obj = None, self.meta_load(obj)
 
 				sent = defaultdict(int)
