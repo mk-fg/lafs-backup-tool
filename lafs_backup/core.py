@@ -775,9 +775,19 @@ class LAFSCheck(LAFSOperation):
 				try: unit = json.loads(line)
 				except ValueError as err:
 					if line.startswith('ERROR:'):
-						# Is usually followed by tahoe backtrace, which is skipped here
-						self.log.fatal('Error from node, aborting: {}'.format(line[6:].strip()))
+						# Is usually followed by tahoe backtrace
+						lid = log_uid()
+						self.log.fatal('{} Error from node, aborting: {}'.format(lid, line[6:].strip()))
 						errors = True
+						# Read and log backtrace lines
+						finished.setTimeout(10)
+						try: yield first_result(finished) # wait until link goes down
+						except: pass # might errback with timeout
+						lines.put(None) # sentinel
+						while True:
+							line = yield lines.get()
+							if line is None: break
+							self.log.info('{} {}'.format(lid, line.rstrip()))
 						break
 					else:
 						self.log.error('Failed to decode as json: {!r}'.format(line))
