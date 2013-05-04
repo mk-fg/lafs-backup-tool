@@ -17,6 +17,11 @@ source:
   entry_cache:
     # Path to persistent db (sqlite) of remote directory nodes, required
     path: # example: /srv/backups/dentries.sqlite
+    # Controls for database transaction commit behavior.
+    # First triggered limit initiates commit. null, 0 or negative value disables the limit.
+    commit_after:
+      queries: 50 # queries to commit after (1 - after every query, 0 - on exit only).
+      seconds: 10 # max seconds between commits.
 
   # How to pick a path among those matched by "path" glob
   pick_policy: alphasort_last # only one supported

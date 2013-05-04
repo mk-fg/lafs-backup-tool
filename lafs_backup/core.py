@@ -197,7 +197,10 @@ class LAFSOperation(object):
 
 		sql_log = logging.getLogger('lafs_backup.EntryCacheDB')\
 			if conf.logging.sql_queries else None
-		self.entry_cache = db.EntryCacheDB(conf.source.entry_cache.path, log=sql_log)
+		self.entry_cache = db.EntryCacheDB(
+			conf.source.entry_cache.path, log=sql_log,
+			commit_after=op.itemgetter('queries', 'seconds')\
+				(conf.source.entry_cache.commit_after) )
 
 		self.debug_timeouts = set()
 

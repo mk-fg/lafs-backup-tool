@@ -63,21 +63,37 @@ class EntryCacheDB(object):
 	_db = None
 
 
-	def __init__(self, path, log=None):
+	def __init__(self, path, log=None, commit_after=None):
 		self._log, self._db = log, sqlite3.connect(path)
 		self._db.row_factory = sqlite3.Row
+
+		# commit_after should be a tuple of (queries, seconds)
+		seq, ts = (None, None) if commit_after else\
+			((v if v and v>=0 else None) for v in commit_after)
+		self._db_seq_limit, self._db_ts_limit = seq, ts
+		self._db_seq, self._db_ts = 0, time()
+
 		self._init_db()
 
 	def __del__(self):
-		if self._db: self._db.close()
+		if self._db:
+			self._db.commit()
+			self._db.close()
+			self._db = None
 
 	@contextmanager
 	def _cursor(self, query, params=tuple(), **kwz):
 		if self._log:
 			self._log.noise('Query: {!r}, data: {!r}'.format(query, params))
-		with self._db as db:
-			with closing(db.execute(query, params, **kwz)) as c:
-				yield c
+		try:
+			with closing(self._db.execute(query, params, **kwz)) as c: yield c
+		finally:
+			self._db_seq, ts = self._db_seq + 1, time()
+			if (self._db_ts_limit and (ts - self._db_ts) >= self._db_ts_limit)\
+					or (self._db_seq_limit and self._db_seq >= self._db_seq_limit):
+				self._db.commit()
+				self._db_seq = 0
+			self._db_ts = ts
 
 	def _query(self, *query_argz, **query_kwz):
 		with self._cursor(*query_argz, **query_kwz): pass
