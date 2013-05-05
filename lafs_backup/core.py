@@ -204,6 +204,14 @@ class LAFSOperation(object):
 
 		self.debug_timeouts = set()
 
+	def timeout_cancel(self, timeout, deferred):
+		timeout_call = reactor.callLater(timeout, deferred.cancel)
+		def timeout_call_cancel(res):
+			if timeout_call.active(): timeout_call.cancel()
+			return res
+		deferred.addBoth(timeout_call_cancel)
+		return timeout_call
+
 	@defer.inlineCallbacks
 	def first_result(self, *deferreds):
 		try:
@@ -783,7 +791,7 @@ class LAFSCheck(LAFSOperation):
 						self.log.fatal('{} Error from node, aborting: {}'.format(lid, line[6:].strip()))
 						errors = True
 						# Read and log backtrace lines
-						finished.setTimeout(10)
+						self.timeout_cancel(10, finished)
 						try: yield first_result(finished) # wait until link goes down
 						except: pass # might errback with timeout
 						lines.put(None) # sentinel
