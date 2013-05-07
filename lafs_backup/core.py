@@ -181,6 +181,7 @@ class LAFSOperation(object):
 	conf_required = None
 	conf_required_init = 'source.entry_cache.path',
 	failure = None # used to indicate that some error was logged
+	few_updates = False # passed to cache-db backend to influence transactions' isolation
 
 	debug_frame = None # frame of a long-running loop method or None
 	debug_timeouts = None # set of callables, causing pending op timeout on call (no args)
@@ -197,10 +198,10 @@ class LAFSOperation(object):
 
 		sql_log = logging.getLogger('lafs_backup.EntryCacheDB')\
 			if conf.logging.sql_queries else None
+		commit_after = (1, None) if self.few_updates else\
+			op.itemgetter('queries', 'seconds')(conf.source.entry_cache.commit_after)
 		self.entry_cache = db.EntryCacheDB(
-			conf.source.entry_cache.path, log=sql_log,
-			commit_after=op.itemgetter('queries', 'seconds')\
-				(conf.source.entry_cache.commit_after) )
+			conf.source.entry_cache.path, log=sql_log, commit_after=commit_after )
 
 		self.debug_timeouts = set()
 
@@ -703,6 +704,8 @@ class LAFSCleanup(LAFSOperation):
 
 class LAFSList(LAFSOperation):
 
+	few_updates = True
+
 	def __init__(self, conf, list_dangling_gens=None):
 		super(LAFSList, self).__init__(conf)
 		self.list_dangling_gens = list_dangling_gens
@@ -740,6 +743,8 @@ class LAFSList(LAFSOperation):
 
 
 class LAFSCheck(LAFSOperation):
+
+	few_updates = True
 
 	def __init__( self, conf, caps=None,
 			fmt_ok=None, fmt_err='{}', pick=True,

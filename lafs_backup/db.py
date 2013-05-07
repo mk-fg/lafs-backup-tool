@@ -64,11 +64,11 @@ class EntryCacheDB(object):
 
 
 	def __init__(self, path, log=None, commit_after=None):
-		self._log, self._db = log, sqlite3.connect(path)
+		self._log, self._db = log, sqlite3.connect(path, timeout=60)
 		self._db.row_factory = sqlite3.Row
 
 		# commit_after should be a tuple of (queries, seconds)
-		seq, ts = (None, None) if commit_after else\
+		seq, ts = (None, None) if not commit_after else\
 			((v if v and v>=0 else None) for v in commit_after)
 		self._db_seq_limit, self._db_ts_limit = seq, ts
 		self._db_seq, self._db_ts = 0, time()
