@@ -1,0 +1,2 @@
+include lafs_backup/core.yaml
+include COPYING README.md
