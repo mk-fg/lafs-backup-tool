@@ -11,12 +11,14 @@ from cffi import FFI
 
 # Try to work around insane "write_table" operations (which assume that
 #  they can just write lextab.py and yacctab.py in current dir), used by default.
-try: from ply.lex import Lexer
-except ImportError: pass
-else: Lexer.writetab = lambda s,*a,**k: None
-try: from ply.yacc import LRGeneratedTable
-except ImportError: pass
-else: LRGeneratedTable.write_table = lambda s,*a,**k: None
+import importlib
+for prefix in '', 'pycparser.': # newer versions of pycparser use bundled ply
+	try: mod = importlib.import_module('{}ply.lex'.format(prefix))
+	except ImportError: pass
+	else: mod.Lexer.writetab = lambda s,*a,**k: None
+	try: mod = importlib.import_module('{}ply.yacc'.format(prefix))
+	except ImportError: pass
+	else: mod.LRGeneratedTable.write_table = lambda s,*a,**k: None
 
 
 
