@@ -1029,9 +1029,9 @@ def main(argv=None, config=None):
 					except AttributeError: signum = getattr(signal, signum)
 			except Exception as err:
 				parser.error( 'Failed to translate value'
-					' ({!r}) to signal: {}'.format(cfg.manhole.on_signal) )
+					' ({!r}) to signal: {}'.format(cfg.manhole.on_signal, err) )
 			def toggle_manhole(sig, frm, svc=manhole):
-				if not manhole.running:
+				if not svc.running:
 					log.info('Starting manhole service (signal {})'.format(sig))
 					reactor.callFromThread(svc.startService)
 				else:
